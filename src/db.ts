@@ -51,7 +51,7 @@ export interface EvaluationInput {
 }
 
 export function defaultDbPath(): string {
-  return process.env.PI_LAOSHI_DB_PATH ?? join(homedir(), ".pi", "laoshi", "learning.duckdb");
+  return process.env.PI_LAOSHI_DB_PATH ?? join(homedir(), ".pi", "agent", "laoshi", "learning.duckdb");
 }
 
 export class LaoshiDatabase {

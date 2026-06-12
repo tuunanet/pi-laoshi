@@ -12,7 +12,7 @@ Early implementation stage. See [`docs/plans/pi-laoshi-agent-plan.md`](docs/plan
 
 - Pi package manifest for extension, skill, and prompt discovery
 - Pi extension with learner profile, vocabulary, activity, evaluation, lesson listing/loading, and due-review tools
-- DuckDB schema initialization under `~/.pi/laoshi/learning.duckdb` by default
+- DuckDB schema initialization under `~/.pi/agent/laoshi/learning.duckdb` by default
 - `PI_LAOSHI_DB_PATH` override for local testing or alternate storage
 - Chinese teacher skill
 - Prompt templates for chat, conversation practice, and vocabulary review

@@ -13,18 +13,18 @@ pi-laoshi continuously maintains a learner vocabulary/progress database in DuckD
 
 ## Proposed Storage Location
 
-Use a dedicated application directory under `~/.pi`:
+Use a dedicated application directory under Pi's agent area:
 
 ```text
-~/.pi/laoshi/
+~/.pi/agent/laoshi/
 ├── learning.duckdb
 ├── backups/
 └── exports/
 ```
 
-Default database file: `~/.pi/laoshi/learning.duckdb`.
+Default database file: `~/.pi/agent/laoshi/learning.duckdb`.
 
-Allow override later via environment variable or setting, e.g. `PI_LAOSHI_DB_PATH`.
+Allow override via environment variable or setting, e.g. `PI_LAOSHI_DB_PATH`.
 
 ## Pi Integration Approach
 
@@ -201,7 +201,7 @@ Likely custom extension tools:
 
 ## Open Design Questions
 
-- Should the database live under `~/.pi/laoshi/` or `~/.pi/agent/laoshi/` for closer Pi alignment?
+- Resolved: store the database under `~/.pi/agent/laoshi/` by default because Pi's global agent resources and settings live under `~/.pi/agent/`.
 - Should vocabulary extraction be explicit via tools only, or also automatic from message events?
 - What spaced repetition algorithm should be used initially: simple due dates or SM-2 style scheduling?
 - Should lesson content be global/package-provided only, or should project-local lesson directories also be supported?
