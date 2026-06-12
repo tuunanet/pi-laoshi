@@ -202,6 +202,6 @@ Likely custom extension tools:
 ## Open Design Questions
 
 - Resolved: store the database under `~/.pi/agent/laoshi/` by default because Pi's global agent resources and settings live under `~/.pi/agent/`.
-- Should vocabulary extraction be explicit via tools only, or also automatic from message events?
+- Resolved: vocabulary extraction and progress recording should be explicit via pi-laoshi tools only for the MVP. This keeps DB writes intentional, auditable, and less noisy; automatic extraction can be considered later as an opt-in candidate-suggestion layer.
 - What spaced repetition algorithm should be used initially: simple due dates or SM-2 style scheduling?
 - Should lesson content be global/package-provided only, or should project-local lesson directories also be supported?
