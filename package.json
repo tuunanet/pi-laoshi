@@ -1,0 +1,62 @@
+{
+  "name": "pi-laoshi",
+  "version": "0.1.0",
+  "description": "Chinese language learning agent for Pi Coding Agent",
+  "type": "module",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tuunanet/pi-laoshi.git"
+  },
+  "keywords": [
+    "pi-package",
+    "pi-coding-agent",
+    "chinese",
+    "language-learning",
+    "typescript",
+    "duckdb"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest --run"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "^1.5.3-r.3",
+    "yaml": "^2.9.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.79.1",
+    "@types/node": "^24.12.4",
+    "typebox": "^1.1.38",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.4"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ],
+    "skills": [
+      "./skills"
+    ],
+    "prompts": [
+      "./prompts"
+    ]
+  },
+  "files": [
+    "content",
+    "extensions",
+    "skills",
+    "prompts",
+    "src",
+    "LICENSE",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  }
+}

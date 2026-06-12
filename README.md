@@ -6,16 +6,34 @@ The goal is to provide an interactive teacher and evaluator that can support Chi
 
 ## Status
 
-Early planning stage. See [`docs/plans/pi-laoshi-agent-plan.md`](docs/plans/pi-laoshi-agent-plan.md) for the current implementation plan.
+Early implementation stage. See [`docs/plans/pi-laoshi-agent-plan.md`](docs/plans/pi-laoshi-agent-plan.md) for the current implementation plan.
+
+## Implemented foundation
+
+- Pi package manifest for extension, skill, and prompt discovery
+- Pi extension with learner profile, vocabulary, activity, evaluation, lesson listing/loading, and due-review tools
+- DuckDB schema initialization under `~/.pi/laoshi/learning.duckdb` by default
+- `PI_LAOSHI_DB_PATH` override for local testing or alternate storage
+- Chinese teacher skill
+- Prompt templates for chat, conversation practice, and vocabulary review
+- Starter lessons and exercises in `content/`
+- TypeScript build and Vitest tests
+
+## Development
+
+```bash
+npm install
+npm run typecheck
+npm test
+npm run build
+```
 
 ## Planned features
 
-- Chinese conversation practice inside Pi sessions
-- Guided pre-scripted lessons and exercises
-- Learner vocabulary/progress tracking with DuckDB
-- Review scheduling for vocabulary practice
-- Evaluation feedback for vocabulary, grammar, pinyin, tones, fluency, and comprehension
-- Pi extension, skill, prompt, and content packaging
+- Richer spaced repetition scheduling
+- More beginner lessons and exercises
+- Backup/export commands for learner data
+- More robust package UX and setup documentation
 
 ## License
 
