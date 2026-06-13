@@ -9,7 +9,9 @@ Build **pi-laoshi** (“Pi Teacher”), a Standard Mandarin Chinese (Putonghua /
 - guided, pre-designed lessons;
 - specific exercise tasks triggered by asking for them by name.
 
-pi-laoshi explicitly focuses on mastery of Standard Mandarin Putonghua: simplified Chinese characters, Hanyu Pinyin, standard pronunciation/tones, and modern mainland standard usage. Traditional Chinese characters are out of scope for the learner model and should not be tracked as a parallel target.
+pi-laoshi explicitly focuses on mastery of Standard Mandarin Putonghua: simplified Chinese characters, Hanyu Pinyin, standard pronunciation/tones, and modern mainland standard usage. Traditional Chinese characters are out of scope for the learner model and should not be tracked as a parallel target; when Traditional characters appear in input or imported content, convert them to Simplified for learner-facing materials and tracking.
+
+The primary initial learner profile is a beginner. Default lessons should be standard-length sessions of about 10–15 minutes.
 
 pi-laoshi continuously maintains a learner vocabulary/progress database in DuckDB under the user’s Pi home area.
 
@@ -46,6 +48,8 @@ Implement pi-laoshi as a Pi package/project that can provide:
 
 3. **Prompt templates** (`.pi/prompts/` or package `prompts/`)
    - Optional slash-command shortcuts for common flows such as `/mandarin-chat`, `/conversation-practice`, `/review-vocab`.
+   - Core workflow commands: `/laoshi-lesson`, `/laoshi-review`, `/laoshi-evaluate`, `/laoshi-settings`, and `/laoshi-handwriting`.
+   - Pinyin visibility commands should be available at any time in a Pi session, such as `/laoshi-pinyin on`, `/laoshi-pinyin off`, and `/laoshi-pinyin hints-only`; changes should apply at the earliest safe/convenient turn.
    - State management commands: `/laoshi-sync`, `/laoshi-export`, and `/laoshi-import`.
 
 4. **Lesson/exercise markdown assets**
@@ -111,9 +115,26 @@ Initial DuckDB tables:
 - `evaluations`
   - `id`
   - `activity_id`
-  - `dimension` (`vocabulary`, `grammar`, `tones`, `pinyin`, `fluency`, `comprehension`)
+  - `dimension` (`vocabulary`, `grammar`, `tones`, `pinyin`, `fluency`, `comprehension`, `listening`, `speaking`, `reading`, `writing`, `handwriting`)
   - `score`
   - `feedback`
+  - `created_at`
+
+- `learner_settings`
+  - `key`
+  - `value`
+  - `updated_at`
+  - Initial settings include pinyin visibility, English-assistance preference, review size, and preferred practice domains.
+
+- `handwriting_events`
+  - `id`
+  - `session_id`
+  - `image_ref`
+  - `recognized_text`
+  - `target_text`
+  - `correction_feedback`
+  - `drill_feedback`
+  - `score`
   - `created_at`
 
 ### 2. Teacher/Evaluator Behavior
@@ -121,13 +142,17 @@ Initial DuckDB tables:
 pi-laoshi should:
 
 - adapt difficulty based on known vocabulary and past scores;
-- explain in English when needed, but encourage Mandarin output;
+- default to Mandarin for teaching interactions and use English when requested, or when needed for safety, clarity, advice, workflow/status messages, or other non-teaching content that will not spoil the learning effort;
+- allow pinyin visibility to be toggled during a session and respect the setting in subsequent teaching turns;
 - evaluate student attempts with concise corrective feedback;
-- prioritize Standard Mandarin pronunciation, tones, Hanyu Pinyin, simplified characters, and modern mainland usage;
-- avoid teaching or tracking Traditional Chinese variants unless briefly noting them for context when unavoidable;
+- provide immediate correction after each learner sentence by default;
+- prioritize Standard Mandarin pronunciation, Hanyu Pinyin, simplified characters, and modern mainland usage;
+- correct tone mistakes, but do not treat tone mistakes as high-priority when the utterance is otherwise understandable;
+- convert Traditional Chinese input/content to Simplified for learning materials and tracking, without explicitly teaching Traditional variants unless briefly necessary for context;
 - record new vocabulary and performance events;
-- suggest spaced-review items from the database;
-- distinguish “introduced vocabulary” from vocabulary the student has actually produced correctly.
+- suggest short, frequent spaced-review sessions when the algorithm says it is a suitable time, asking before starting;
+- distinguish “introduced vocabulary” from vocabulary the student has actually produced correctly;
+- track skill areas separately, including listening, speaking, reading, writing/handwriting, pinyin, tones, grammar, vocabulary, fluency, and comprehension.
 
 ### 3. Pre-scripted Markdown Lessons and Exercises
 
@@ -171,7 +196,10 @@ Likely custom extension tools:
 - `laoshi_start_activity` / `laoshi_finish_activity` — track current activity.
 - `laoshi_record_evaluation` — save rubric scores and feedback.
 - `laoshi_due_review` — fetch due vocabulary for spaced repetition.
-- `laoshi_sync_state` — synchronize the local learner state directory with configured blob storage.
+- `laoshi_evaluate_learner` — evaluate the full historical learner database and infer current level, strengths, weaknesses, and recommended next lessons.
+- `laoshi_get_settings` / `laoshi_update_settings` — inspect and change learner settings such as pinyin visibility and review size.
+- `laoshi_record_handwriting_event` — record handwritten character practice, corrections, generated drill feedback, and progress.
+- `laoshi_sync_state` — synchronize the local learner state directory with configured Azure Blob Storage.
 - `laoshi_export_state` — create a portable backup/archive of DuckDB and related learner state.
 - `laoshi_import_state` — restore learner state from a backup/archive.
 
@@ -181,8 +209,8 @@ Support keeping multiple computers reasonably in sync with the same learner stat
 
 Slash commands:
 
-- `/laoshi-sync` — synchronize `~/.pi/agent/laoshi/` with a configured blob storage account.
-- `/laoshi-export` — export a backup archive containing `learning.duckdb` and all related state files.
+- `/laoshi-sync` — manually synchronize `~/.pi/agent/laoshi/` with a configured Azure Blob Storage account.
+- `/laoshi-export` — export a backup archive containing `learning.duckdb`, all conversation-derived learner events/corrections, and all related state files.
 - `/laoshi-import` — import a backup archive and restore local learner state.
 
 Design notes:
@@ -193,6 +221,7 @@ Design notes:
 - Prefer simple last-writer-wins or explicit conflict files for the MVP; do not silently merge divergent DuckDB files.
 - Store blob credentials/config outside exported learner backups unless the user explicitly asks to include them.
 - Ensure import makes a timestamped local backup before replacing current state.
+- Sync is manual-only for the MVP; do not auto-sync or prompt at session end unless this decision is revisited.
 
 ## Milestones
 
@@ -222,16 +251,24 @@ Design notes:
 
 - Implement activity/evaluation tables and tools.
 - Add scoring rubrics.
-- Add due-review query logic.
+- Add due-review query logic for short, frequent review sessions.
+- Implement `/laoshi-evaluate` against the full historical learner database, including recommended next lessons matched to inferred beginner skill level and practical needs.
 - Teach the agent when to mark vocabulary as introduced/practicing/known/mastered.
 
 ### Milestone 5 — Packaging and UX
 
 - Package as a Pi package with extension, skill, prompts, and content.
 - Add setup documentation.
-- Add `/laoshi-sync` command for synchronizing DuckDB and related state through blob storage.
+- Add `/laoshi-sync` command for synchronizing DuckDB and related state through Azure Blob Storage.
 - Add `/laoshi-export` and `/laoshi-import` commands for portable learner-state backups.
+- Add `/laoshi-settings`, `/laoshi-pinyin`, `/laoshi-lesson`, `/laoshi-review`, `/laoshi-evaluate`, and `/laoshi-handwriting` command UX.
 - Add tests for DB migrations, markdown parsing, tool behavior, sync manifests, and backup/restore flows.
+
+### Milestone 6 — Multimodal Practice
+
+- Add eventual speech/audio support for pronunciation and listening/speaking practice.
+- Add pasted-photo interpretation for mixed handwritten pages containing many characters, words, or sentences.
+- Generate handwriting corrections and writing-drill feedback, and record results into learner progress.
 
 ## Open Design Questions
 
@@ -240,4 +277,5 @@ Design notes:
 - Resolved: start with simple interval-based due dates for the MVP, while shaping the schema so SM-2 can be added without migration pain. Store scheduling metadata such as interval, ease factor, review count, lapse count, last reviewed time, and due time.
 - Resolved: lesson content should support both package-provided lessons and student-created custom lessons/exercises.
 - Should custom lesson content be stored only under `~/.pi/agent/laoshi/`, or should project-local lesson directories also be supported?
-- Which blob storage providers should be supported first, and should the sync layer use provider-specific SDKs or a generic object-store abstraction?
+- Resolved: Azure Blob Storage is the first sync provider for `/laoshi-sync`.
+- Future question: should later sync providers use provider-specific SDKs or a generic object-store abstraction?
