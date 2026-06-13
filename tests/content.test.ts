@@ -127,6 +127,20 @@ describe("content activities", () => {
       expect(updated.path.endsWith("content.test.ts")).toBe(false);
       expect(updated.type).toBe("exercise");
 
+      const traditional = await saveCustomActivity(
+        {
+          id: "traditional-source",
+          type: "lesson",
+          title: "Traditional Source",
+          level: "beginner",
+          target_vocab: ["老師", "學習"],
+          body: "## Objective\n\n老師說謝謝。",
+        },
+        { customContentDir: tempDir },
+      );
+      expect(traditional.target_vocab).toEqual(["老师", "学习"]);
+      expect(traditional.body).toContain("老师说谢谢");
+
       const oldStateDir = process.env.PI_LAOSHI_STATE_DIR;
       process.env.PI_LAOSHI_STATE_DIR = tempDir;
       try {

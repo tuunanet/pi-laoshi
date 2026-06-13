@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
 import { defaultDbPath, ensureLaoshiStateDirs } from "./paths.js";
 import { DEFAULT_SETTINGS, validateSetting, validateSettings } from "./settings.js";
+import { normalizeVocabInput, toSimplifiedChinese } from "./simplified.js";
 
 export type VocabStatus = "introduced" | "practicing" | "review" | "known" | "mastered";
 export type VocabEventType = "introduced" | "recognized" | "produced" | "corrected" | "reviewed";
@@ -223,6 +224,7 @@ export class LaoshiDatabase {
   }
 
   async upsertVocab(input: VocabInput) {
+    const normalizedInput = normalizeVocabInput(input);
     const db = await this.connect();
     const id = randomUUID();
     await db.run(
@@ -253,29 +255,29 @@ export class LaoshiDatabase {
       `,
       {
         id,
-        simplified: input.simplified,
-        traditional: input.traditional ?? null,
-        pinyin: input.pinyin ?? null,
-        english_gloss: input.english_gloss ?? null,
-        part_of_speech: input.part_of_speech ?? null,
-        hsk_level: input.hsk_level ?? null,
-        source: input.source ?? null,
-        status: input.status ?? "introduced",
-        ease_score: input.ease_score ?? 2.5,
-        review_due_at: input.review_due_at ?? null,
-        interval_days: input.interval_days ?? 0,
-        ease_factor: input.ease_factor ?? input.ease_score ?? 2.5,
-        review_count: input.review_count ?? 0,
-        lapse_count: input.lapse_count ?? 0,
-        last_reviewed_at: input.last_reviewed_at ?? null,
+        simplified: normalizedInput.simplified,
+        traditional: normalizedInput.traditional ?? null,
+        pinyin: normalizedInput.pinyin ?? null,
+        english_gloss: normalizedInput.english_gloss ?? null,
+        part_of_speech: normalizedInput.part_of_speech ?? null,
+        hsk_level: normalizedInput.hsk_level ?? null,
+        source: normalizedInput.source ?? null,
+        status: normalizedInput.status ?? "introduced",
+        ease_score: normalizedInput.ease_score ?? 2.5,
+        review_due_at: normalizedInput.review_due_at ?? null,
+        interval_days: normalizedInput.interval_days ?? 0,
+        ease_factor: normalizedInput.ease_factor ?? normalizedInput.ease_score ?? 2.5,
+        review_count: normalizedInput.review_count ?? 0,
+        lapse_count: normalizedInput.lapse_count ?? 0,
+        last_reviewed_at: normalizedInput.last_reviewed_at ?? null,
       },
     );
-    return this.getVocabBySimplified(input.simplified);
+    return this.getVocabBySimplified(normalizedInput.simplified);
   }
 
   async getVocabBySimplified(simplified: string) {
     const db = await this.connect();
-    const result = await db.run("SELECT * FROM vocabulary WHERE simplified = $simplified LIMIT 1", { simplified });
+    const result = await db.run("SELECT * FROM vocabulary WHERE simplified = $simplified LIMIT 1", { simplified: toSimplifiedChinese(simplified) });
     return (await result.getRowObjectsJson())[0] ?? null;
   }
 

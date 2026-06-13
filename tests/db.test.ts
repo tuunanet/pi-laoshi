@@ -25,8 +25,13 @@ describe("LaoshiDatabase", () => {
     await expect(disconnected.migrate()).rejects.toThrow(/not connected/);
     disconnected.close();
   });
-  it("migrates and upserts vocabulary", async () => {
+  it("migrates, normalizes, and upserts vocabulary", async () => {
     await db.connect();
+    const normalized = await db.upsertVocab({ simplified: "老師", pinyin: "lǎo shī", english_gloss: "teacher" });
+    expect(normalized.simplified).toBe("老师");
+    expect(normalized.traditional).toBe("老師");
+    await expect(db.getVocabBySimplified("老師")).resolves.toMatchObject({ simplified: "老师" });
+
     const vocab = await db.upsertVocab({ simplified: "你好", pinyin: "nǐ hǎo", english_gloss: "hello" });
     expect(vocab.simplified).toBe("你好");
 
@@ -91,7 +96,9 @@ describe("LaoshiDatabase", () => {
     vocab = await db.getVocabById(String(event.vocab_id));
     expect(vocab.status).toBe("known");
 
-    const review = await db.recordVocabEvent({ simplified: "谢谢", event_type: "reviewed", score: 0.9 });
+    const review = await db.recordVocabEvent({ simplified: "謝謝", event_type: "reviewed", score: 0.9 });
+    const normalizedReviewVocab = await db.getVocabById(String(review.vocab_id));
+    expect(normalizedReviewVocab.simplified).toBe("谢谢");
     await db.recordVocabEvent({ vocab_id: String(review.vocab_id), event_type: "reviewed", score: 0.9 });
     await db.recordVocabEvent({ vocab_id: String(review.vocab_id), event_type: "reviewed", score: 0.9 });
     await db.recordVocabEvent({ vocab_id: String(review.vocab_id), event_type: "reviewed", score: 0.9 });

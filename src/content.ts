@@ -2,6 +2,7 @@ import { access, mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import YAML from "yaml";
 import { defaultCustomContentDir } from "./paths.js";
+import { toSimplifiedChinese } from "./simplified.js";
 
 export type ActivityKind = "lesson" | "exercise";
 export type ActivityOrigin = "package" | "custom";
@@ -85,12 +86,12 @@ export function parseMarkdownActivity(
     type: data.type,
     title: data.title,
     level: data.level,
-    target_vocab: data.target_vocab ?? [],
+    target_vocab: (data.target_vocab ?? []).map(toSimplifiedChinese),
     estimated_minutes: data.estimated_minutes,
     path,
     origin,
     editable,
-    body: match[2].trim(),
+    body: toSimplifiedChinese(match[2].trim()),
   };
 }
 
@@ -149,10 +150,10 @@ function markdownForActivity(input: ActivitySaveInput): string {
     type: input.type,
     title: input.title,
     level: input.level,
-    target_vocab: input.target_vocab ?? [],
+    target_vocab: (input.target_vocab ?? []).map(toSimplifiedChinese),
     estimated_minutes: input.estimated_minutes,
   };
-  return `---\n${YAML.stringify(frontmatter).trim()}\n---\n\n${input.body.trim()}\n`;
+  return `---\n${YAML.stringify(frontmatter).trim()}\n---\n\n${toSimplifiedChinese(input.body.trim())}\n`;
 }
 
 export async function saveCustomActivity(

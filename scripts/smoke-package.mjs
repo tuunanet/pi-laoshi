@@ -63,6 +63,7 @@ const requiredPackedFiles = [
   "src/backup.ts",
   "src/sync.ts",
   "src/evaluation.ts",
+  "src/simplified.ts",
   "scripts/smoke-package.mjs",
 ];
 
