@@ -203,5 +203,5 @@ Likely custom extension tools:
 
 - Resolved: store the database under `~/.pi/agent/laoshi/` by default because Pi's global agent resources and settings live under `~/.pi/agent/`.
 - Resolved: vocabulary extraction and progress recording should be explicit via pi-laoshi tools only for the MVP. This keeps DB writes intentional, auditable, and less noisy; automatic extraction can be considered later as an opt-in candidate-suggestion layer.
-- What spaced repetition algorithm should be used initially: simple due dates or SM-2 style scheduling?
+- Resolved: start with simple interval-based due dates for the MVP, while shaping the schema so SM-2 can be added without migration pain. Store scheduling metadata such as interval, ease factor, review count, lapse count, last reviewed time, and due time.
 - Should lesson content be global/package-provided only, or should project-local lesson directories also be supported?
