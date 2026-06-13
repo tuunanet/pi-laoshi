@@ -2,6 +2,8 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { LaoshiDatabase } from "../../src/db.js";
 import { listActivities, loadActivity, saveCustomActivity } from "../../src/content.js";
+import { exportLaoshiState, importLaoshiState } from "../../src/backup.js";
+import { syncState } from "../../src/sync.js";
 
 const StatusSchema = Type.Union([
   Type.Literal("introduced"),
@@ -149,6 +151,36 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     description: "Start handwriting or character-writing practice",
     handler: async (args, ctx) => {
       pi.sendUserMessage(`Start a pi-laoshi handwriting practice session${args.trim() ? ` for: ${args.trim()}` : ""}. If I attach an image, evaluate it and record handwriting feedback.`);
+    },
+  });
+
+  pi.registerCommand("laoshi-export", {
+    description: "Export a portable pi-laoshi learner-state backup",
+    handler: async (_args, ctx) => {
+      const result = await exportLaoshiState();
+      ctx.ui.notify(`Exported pi-laoshi state to ${result.archivePath}`, "info");
+    },
+  });
+
+  pi.registerCommand("laoshi-import", {
+    description: "Import a pi-laoshi learner-state backup archive",
+    handler: async (args, ctx) => {
+      const archivePath = args.trim();
+      if (!archivePath) {
+        ctx.ui.notify("Usage: /laoshi-import <archive-path>", "warning");
+        return;
+      }
+      const result = await importLaoshiState({ archivePath });
+      ctx.ui.notify(`Imported pi-laoshi state (${result.restoredFiles.length} files). Pre-import backup: ${result.preImportBackupPath}`, "info");
+    },
+  });
+
+  pi.registerCommand("laoshi-sync", {
+    description: "Manually synchronize pi-laoshi learner state with configured Azure Blob Storage",
+    handler: async (args, ctx) => {
+      const dryRun = args.trim() === "--dry-run";
+      const result = await syncState({ dryRun });
+      ctx.ui.notify(`pi-laoshi sync ${result.status}`, result.status === "conflict" ? "warning" : "info");
     },
   });
 
@@ -365,6 +397,45 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     async execute(_toolCallId, params) {
       const event = await db.recordHandwritingEvent(params);
       return textResult("Recorded handwriting event", { event });
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_export_state",
+    label: "Laoshi Export State",
+    description: "Create a portable backup archive of the pi-laoshi DuckDB database and learner state files.",
+    promptSnippet: "Export a pi-laoshi learner-state backup archive",
+    promptGuidelines: ["Use laoshi_export_state when the learner asks to back up or export pi-laoshi progress."],
+    parameters: Type.Object({ output_path: Type.Optional(Type.String()) }),
+    async execute(_toolCallId, params) {
+      const result = await exportLaoshiState({ outputPath: params.output_path });
+      return textResult(`Exported pi-laoshi state to ${result.archivePath}`, result);
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_import_state",
+    label: "Laoshi Import State",
+    description: "Restore pi-laoshi learner state from a backup archive after making a pre-import backup.",
+    promptSnippet: "Import a pi-laoshi learner-state backup archive",
+    promptGuidelines: ["Use laoshi_import_state only when the learner explicitly asks to restore a pi-laoshi backup."],
+    parameters: Type.Object({ archive_path: Type.String() }),
+    async execute(_toolCallId, params) {
+      const result = await importLaoshiState({ archivePath: params.archive_path });
+      return textResult(`Imported pi-laoshi state from ${params.archive_path}`, result);
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_sync_state",
+    label: "Laoshi Sync State",
+    description: "Synchronize local pi-laoshi learner state with configured Azure Blob Storage.",
+    promptSnippet: "Synchronize pi-laoshi learner state with Azure Blob Storage",
+    promptGuidelines: ["Use laoshi_sync_state when the learner asks to run manual pi-laoshi sync."],
+    parameters: Type.Object({ dry_run: Type.Optional(Type.Boolean()) }),
+    async execute(_toolCallId, params) {
+      const result = await syncState({ dryRun: params.dry_run });
+      return textResult(`pi-laoshi sync ${result.status}`, result);
     },
   });
 

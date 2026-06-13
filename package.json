@@ -19,9 +19,11 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "vitest --run"
+    "test": "vitest --run",
+    "coverage": "vitest --run --coverage"
   },
   "dependencies": {
+    "@azure/storage-blob": "^12.32.0",
     "@duckdb/node-api": "^1.5.3-r.3",
     "yaml": "^2.9.0"
   },
@@ -32,6 +34,7 @@
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^0.79.1",
     "@types/node": "^24.12.4",
+    "@vitest/coverage-v8": "^3.2.6",
     "typebox": "^1.1.38",
     "typescript": "^5.9.3",
     "vitest": "^3.2.4"

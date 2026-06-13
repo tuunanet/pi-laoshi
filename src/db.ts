@@ -3,6 +3,7 @@ import { dirname } from "node:path";
 import { randomUUID } from "node:crypto";
 import { DuckDBConnection, DuckDBInstance } from "@duckdb/node-api";
 import { defaultDbPath, ensureLaoshiStateDirs } from "./paths.js";
+import { DEFAULT_SETTINGS, validateSetting, validateSettings } from "./settings.js";
 
 export type VocabStatus = "introduced" | "practicing" | "review" | "known" | "mastered";
 export type VocabEventType = "introduced" | "recognized" | "produced" | "corrected" | "reviewed";
@@ -80,13 +81,6 @@ export interface LearnerSettingInput {
   key: string;
   value: string;
 }
-
-const DEFAULT_SETTINGS: Record<string, string> = {
-  pinyin_visibility: "hints-only",
-  english_assistance: "when-needed",
-  review_size: "10",
-  preferred_practice_domains: "daily-life,greetings,numbers",
-};
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
@@ -436,18 +430,19 @@ export class LaoshiDatabase {
   }
 
   async updateSetting(input: LearnerSettingInput) {
+    const validated = validateSetting(input);
     const db = await this.connect();
     await db.run(
       `INSERT INTO learner_settings (key, value, updated_at) VALUES ($key, $value, now())
        ON CONFLICT (key) DO UPDATE SET value = excluded.value, updated_at = now()`,
-      { key: input.key, value: input.value },
+      { key: validated.key, value: validated.value },
     );
-    return input;
+    return validated;
   }
 
   async updateSettings(settings: LearnerSettingInput[]) {
     const updated = [];
-    for (const setting of settings) updated.push(await this.updateSetting(setting));
+    for (const setting of validateSettings(settings)) updated.push(await this.updateSetting(setting));
     return updated;
   }
 
