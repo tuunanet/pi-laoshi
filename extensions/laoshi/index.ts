@@ -4,6 +4,7 @@ import { LaoshiDatabase } from "../../src/db.js";
 import { listActivities, loadActivity, saveCustomActivity } from "../../src/content.js";
 import { exportLaoshiState, importLaoshiState } from "../../src/backup.js";
 import { syncState } from "../../src/sync.js";
+import { evaluateLearnerProgress, type LearnerProgressProfile } from "../../src/evaluation.js";
 
 const StatusSchema = Type.Union([
   Type.Literal("introduced"),
@@ -58,7 +59,7 @@ const ActivitySaveSchema = Type.Object({
   body: Type.String({ description: "Markdown body with objective, script, practice, rubric, and recording instructions" }),
 });
 
-function textResult(text: string, details?: Record<string, unknown>) {
+function textResult(text: string, details?: unknown) {
   return { content: [{ type: "text" as const, text }], details };
 }
 
@@ -74,8 +75,21 @@ function parseSettingsArgs(args: string): Array<{ key: string; value: string }> 
     });
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 export default function laoshiExtension(pi: ExtensionAPI) {
   const db = new LaoshiDatabase();
+
+  async function withClosedDatabase<T>(operation: () => Promise<T>): Promise<T> {
+    db.close();
+    try {
+      return await operation();
+    } finally {
+      await db.connect();
+    }
+  }
 
   pi.on("session_start", async (_event, ctx) => {
     await db.connect();
@@ -157,8 +171,12 @@ export default function laoshiExtension(pi: ExtensionAPI) {
   pi.registerCommand("laoshi-export", {
     description: "Export a portable pi-laoshi learner-state backup",
     handler: async (_args, ctx) => {
-      const result = await exportLaoshiState();
-      ctx.ui.notify(`Exported pi-laoshi state to ${result.archivePath}`, "info");
+      try {
+        const result = await withClosedDatabase(() => exportLaoshiState());
+        ctx.ui.notify(`Exported pi-laoshi state to ${result.archivePath}`, "info");
+      } catch (error) {
+        ctx.ui.notify(`pi-laoshi export failed: ${errorMessage(error)}`, "error");
+      }
     },
   });
 
@@ -170,8 +188,12 @@ export default function laoshiExtension(pi: ExtensionAPI) {
         ctx.ui.notify("Usage: /laoshi-import <archive-path>", "warning");
         return;
       }
-      const result = await importLaoshiState({ archivePath });
-      ctx.ui.notify(`Imported pi-laoshi state (${result.restoredFiles.length} files). Pre-import backup: ${result.preImportBackupPath}`, "info");
+      try {
+        const result = await withClosedDatabase(() => importLaoshiState({ archivePath }));
+        ctx.ui.notify(`Imported pi-laoshi state (${result.restoredFiles.length} files). Pre-import backup: ${result.preImportBackupPath}`, "info");
+      } catch (error) {
+        ctx.ui.notify(`pi-laoshi import failed: ${errorMessage(error)}`, "error");
+      }
     },
   });
 
@@ -179,8 +201,15 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     description: "Manually synchronize pi-laoshi learner state with configured Azure Blob Storage",
     handler: async (args, ctx) => {
       const dryRun = args.trim() === "--dry-run";
-      const result = await syncState({ dryRun });
-      ctx.ui.notify(`pi-laoshi sync ${result.status}`, result.status === "conflict" ? "warning" : "info");
+      try {
+        const result = await withClosedDatabase(() => syncState({ dryRun }));
+        const message = result.status === "needs-import"
+          ? "pi-laoshi sync needs-import: remote state exists; local state was not uploaded"
+          : `pi-laoshi sync ${result.status}`;
+        ctx.ui.notify(message, result.status === "conflict" || result.status === "needs-import" ? "warning" : "info");
+      } catch (error) {
+        ctx.ui.notify(`pi-laoshi sync failed: ${errorMessage(error)}`, "error");
+      }
     },
   });
 
@@ -408,7 +437,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     promptGuidelines: ["Use laoshi_export_state when the learner asks to back up or export pi-laoshi progress."],
     parameters: Type.Object({ output_path: Type.Optional(Type.String()) }),
     async execute(_toolCallId, params) {
-      const result = await exportLaoshiState({ outputPath: params.output_path });
+      const result = await withClosedDatabase(() => exportLaoshiState({ outputPath: params.output_path }));
       return textResult(`Exported pi-laoshi state to ${result.archivePath}`, result);
     },
   });
@@ -421,7 +450,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     promptGuidelines: ["Use laoshi_import_state only when the learner explicitly asks to restore a pi-laoshi backup."],
     parameters: Type.Object({ archive_path: Type.String() }),
     async execute(_toolCallId, params) {
-      const result = await importLaoshiState({ archivePath: params.archive_path });
+      const result = await withClosedDatabase(() => importLaoshiState({ archivePath: params.archive_path }));
       return textResult(`Imported pi-laoshi state from ${params.archive_path}`, result);
     },
   });
@@ -434,7 +463,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     promptGuidelines: ["Use laoshi_sync_state when the learner asks to run manual pi-laoshi sync."],
     parameters: Type.Object({ dry_run: Type.Optional(Type.Boolean()) }),
     async execute(_toolCallId, params) {
-      const result = await syncState({ dryRun: params.dry_run });
+      const result = await withClosedDatabase(() => syncState({ dryRun: params.dry_run }));
       return textResult(`pi-laoshi sync ${result.status}`, result);
     },
   });
@@ -449,19 +478,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     async execute() {
       const profile = await db.profileSummary();
       const activities = await listActivities();
-      const counts = profile.vocabulary_counts as Array<{ status: string; count: number }>;
-      const totalVocab = counts.reduce((sum, row) => sum + Number(row.count ?? 0), 0);
-      const dueCount = (profile.due_reviews as unknown[]).length;
-      const recommendations = activities
-        .filter((activity) => ["pinyin-basics", "greetings-1", "numbers-1", "introduce-yourself"].includes(activity.id))
-        .slice(0, totalVocab < 15 ? 4 : 2);
-      const evaluation = {
-        inferred_level: totalVocab < 40 ? "beginner" : "beginner-plus",
-        strengths: totalVocab > 0 ? ["Vocabulary tracking has started"] : [],
-        weaknesses: totalVocab === 0 ? ["No recorded vocabulary yet"] : dueCount > 0 ? ["Some vocabulary is due for review"] : [],
-        recommended_next_activities: recommendations,
-        profile,
-      };
+      const evaluation = evaluateLearnerProgress(profile as unknown as LearnerProgressProfile, activities);
       return textResult(JSON.stringify(evaluation, null, 2), evaluation);
     },
   });

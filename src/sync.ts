@@ -131,6 +131,9 @@ export async function syncState(options: SyncOptions = {}) {
   if (options.dryRun) return { status: "dry-run" as const, localManifest };
 
   const remoteManifest = await downloadRemoteManifest(config);
+  if (remoteManifest && !localState.last_remote_revision) {
+    return { status: "needs-import" as const, localManifest, remoteManifest };
+  }
   if (remoteManifest && localState.last_remote_revision && remoteManifest.revision !== localState.last_remote_revision) {
     const conflictPath = join(stateDir, "state", `sync-conflict-${new Date().toISOString().replace(/[:.]/gu, "-")}.json`);
     await mkdir(dirname(conflictPath), { recursive: true });

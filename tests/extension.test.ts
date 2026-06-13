@@ -1,12 +1,17 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import laoshiExtension from "../extensions/laoshi/index.js";
+import { LaoshiDatabase } from "../src/db.js";
 
 interface RegisteredTool {
   name: string;
   execute: (...args: any[]) => Promise<any>;
+}
+
+interface RegisteredCommand {
+  handler: (args: string, ctx: { ui: { notify: (message: string, level?: string) => void } }) => Promise<void>;
 }
 
 let tempDir: string;
@@ -16,21 +21,24 @@ let oldStateDir: string | undefined;
 function createMockPi() {
   const handlers = new Map<string, Function[]>();
   const tools: RegisteredTool[] = [];
-  const commands = new Map<string, unknown>();
+  const commands = new Map<string, RegisteredCommand>();
+  const notifications: Array<{ message: string; level?: string }> = [];
   return {
     handlers,
     tools,
     commands,
+    notifications,
     on(name: string, handler: Function) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
     },
     registerTool(tool: RegisteredTool) {
       tools.push(tool);
     },
-    registerCommand(name: string, command: unknown) {
+    registerCommand(name: string, command: RegisteredCommand) {
       commands.set(name, command);
     },
     sendUserMessage() {},
+    commandContext: { ui: { notify: (message: string, level?: string) => notifications.push({ message, level }) } },
   } as any;
 }
 
@@ -80,6 +88,63 @@ describe("laoshi extension", () => {
       "laoshi_update_activity",
       "laoshi_update_settings",
     ]));
+  });
+
+  it("closes the database around state export, import, and sync tools", async () => {
+    const oldContainer = process.env.PI_LAOSHI_AZURE_CONTAINER;
+    const oldConnection = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    const closeSpy = vi.spyOn(LaoshiDatabase.prototype, "close");
+    try {
+      process.env.PI_LAOSHI_AZURE_CONTAINER = "laoshi";
+      process.env.AZURE_STORAGE_CONNECTION_STRING = "UseDevelopmentStorage=true";
+      const pi = createMockPi();
+      laoshiExtension(pi);
+
+      const updateSettings = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_update_settings");
+      await updateSettings.execute("tool-call", { settings: [{ key: "pinyin_visibility", value: "off" }] });
+
+      const exportState = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_export_state");
+      const exportResult = await exportState.execute("tool-call", {});
+
+      const syncState = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_sync_state");
+      await syncState.execute("tool-call", { dry_run: true });
+
+      const importState = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_import_state");
+      await importState.execute("tool-call", { archive_path: exportResult.details.archivePath });
+
+      expect(closeSpy).toHaveBeenCalledTimes(3);
+    } finally {
+      closeSpy.mockRestore();
+      if (oldContainer === undefined) delete process.env.PI_LAOSHI_AZURE_CONTAINER;
+      else process.env.PI_LAOSHI_AZURE_CONTAINER = oldContainer;
+      if (oldConnection === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING;
+      else process.env.AZURE_STORAGE_CONNECTION_STRING = oldConnection;
+    }
+  });
+
+  it("reports command errors without throwing and reconnects the database", async () => {
+    const oldContainer = process.env.PI_LAOSHI_AZURE_CONTAINER;
+    const oldConnection = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    const closeSpy = vi.spyOn(LaoshiDatabase.prototype, "close");
+    const connectSpy = vi.spyOn(LaoshiDatabase.prototype, "connect");
+    try {
+      delete process.env.PI_LAOSHI_AZURE_CONTAINER;
+      delete process.env.AZURE_STORAGE_CONNECTION_STRING;
+      const pi = createMockPi();
+      laoshiExtension(pi);
+      await pi.commands.get("laoshi-sync")?.handler("", pi.commandContext);
+      expect(pi.notifications.at(-1)).toMatchObject({ level: "error" });
+      expect(pi.notifications.at(-1)?.message).toContain("Azure sync requires");
+      expect(closeSpy).toHaveBeenCalled();
+      expect(connectSpy).toHaveBeenCalled();
+    } finally {
+      closeSpy.mockRestore();
+      connectSpy.mockRestore();
+      if (oldContainer === undefined) delete process.env.PI_LAOSHI_AZURE_CONTAINER;
+      else process.env.PI_LAOSHI_AZURE_CONTAINER = oldContainer;
+      if (oldConnection === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING;
+      else process.env.AZURE_STORAGE_CONNECTION_STRING = oldConnection;
+    }
   });
 
   it("executes settings and export tools against isolated state", async () => {

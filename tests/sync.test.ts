@@ -135,6 +135,33 @@ describe("state sync helpers", () => {
     }
   });
 
+  it("does not overwrite existing remote state from a new local device", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "pi-laoshi-sync-new-device-"));
+    try {
+      await writeFile(join(stateDir, "learning.duckdb"), "local-db");
+      blobStore.set("sync/manifest.json", Buffer.from(JSON.stringify({
+        format: "pi-laoshi-sync-v1",
+        revision: "remote-rev",
+        device_id: "device-remote",
+        created_at: new Date().toISOString(),
+        files: [{ path: "learning.duckdb", bytes: 9, sha256: "0".repeat(64) }],
+      })));
+      blobStore.set("files/learning.duckdb", Buffer.from("remote-db"));
+
+      const result = await syncState({
+        stateDir,
+        config: { connectionString: "UseDevelopmentStorage=true", containerName: "laoshi" },
+      });
+      expect(result.status).toBe("needs-import");
+      expect(blobStore.get("files/learning.duckdb")?.toString()).toBe("remote-db");
+      if (result.status === "needs-import") {
+        expect(result.remoteManifest.revision).toBe("remote-rev");
+      }
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("uploads state and writes local sync state", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "pi-laoshi-sync-upload-"));
     try {
