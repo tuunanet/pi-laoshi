@@ -1,13 +1,15 @@
-# pi-laoshi: Agentic Chinese Language Learning Agent Plan
+# pi-laoshi: Agentic Standard Mandarin Learning Agent Plan
 
 ## Goal
 
-Build **pi-laoshi** (“Pi Teacher”), a Chinese language learning agent based on Pi Coding Agent. The agent acts as a teacher and evaluator while the student interacts naturally in a Pi session through:
+Build **pi-laoshi** (“Pi Teacher”), a Standard Mandarin Chinese (Putonghua / 普通话) learning agent based on Pi Coding Agent. The agent acts as a teacher and evaluator while the student interacts naturally in a Pi session through:
 
-- casual chat about Chinese language/culture;
-- practicing Chinese conversation;
+- casual chat about Mandarin language/culture;
+- practicing Standard Mandarin conversation;
 - guided, pre-designed lessons;
 - specific exercise tasks triggered by asking for them by name.
+
+pi-laoshi explicitly focuses on mastery of Standard Mandarin Putonghua: simplified Chinese characters, Hanyu Pinyin, standard pronunciation/tones, and modern mainland standard usage. Traditional Chinese characters are out of scope for the learner model and should not be tracked as a parallel target.
 
 pi-laoshi continuously maintains a learner vocabulary/progress database in DuckDB under the user’s Pi home area.
 
@@ -40,14 +42,16 @@ Implement pi-laoshi as a Pi package/project that can provide:
    - Stores vocabulary and evaluation results in DuckDB.
 
 2. **Skills** (`.pi/skills/` or package `skills/`)
-   - A `chinese-teacher` skill containing pedagogy, correction style, and interaction rules.
+   - A `mandarin-teacher` skill containing Putonghua-focused pedagogy, correction style, and interaction rules.
 
 3. **Prompt templates** (`.pi/prompts/` or package `prompts/`)
-   - Optional slash-command shortcuts for common flows such as `/chinese-chat`, `/conversation-practice`, `/review-vocab`.
+   - Optional slash-command shortcuts for common flows such as `/mandarin-chat`, `/conversation-practice`, `/review-vocab`.
    - State management commands: `/laoshi-sync`, `/laoshi-export`, and `/laoshi-import`.
 
 4. **Lesson/exercise markdown assets**
-   - Versioned pre-scripted markdown lesson files stored in the project/package, for example:
+   - Versioned pre-scripted markdown lesson files stored in the project/package.
+   - Student-created custom lessons/exercises stored in the learner state directory or an optional project-local content directory, so learners can ask pi-laoshi to draft, save, revise, and later run their own lessons.
+   - For example:
 
 ```text
 content/
@@ -61,7 +65,7 @@ content/
     └── measure-words-1.md
 ```
 
-The extension should expose lesson/exercise metadata to the agent, so a student can say “begin greetings 1” and the agent can load the right markdown file.
+The extension should expose lesson/exercise metadata to the agent, so a student can say “begin greetings 1” and the agent can load the right markdown file. It should include both packaged lessons and student-created lessons in the catalog, while clearly marking origin and editability.
 
 ## Core Features
 
@@ -74,7 +78,6 @@ Initial DuckDB tables:
 - `vocabulary`
   - `id`
   - `simplified`
-  - `traditional`
   - `pinyin`
   - `english_gloss`
   - `part_of_speech`
@@ -118,8 +121,10 @@ Initial DuckDB tables:
 pi-laoshi should:
 
 - adapt difficulty based on known vocabulary and past scores;
-- explain in English when needed, but encourage Chinese output;
+- explain in English when needed, but encourage Mandarin output;
 - evaluate student attempts with concise corrective feedback;
+- prioritize Standard Mandarin pronunciation, tones, Hanyu Pinyin, simplified characters, and modern mainland usage;
+- avoid teaching or tracking Traditional Chinese variants unless briefly noting them for context when unavoidable;
 - record new vocabulary and performance events;
 - suggest spaced-review items from the database;
 - distinguish “introduced vocabulary” from vocabulary the student has actually produced correctly.
@@ -162,6 +167,7 @@ Likely custom extension tools:
 - `laoshi_record_vocab_event` — record student interaction with a vocabulary item.
 - `laoshi_list_lessons` — list available lesson/exercise markdown assets.
 - `laoshi_load_activity` — load a specific lesson or exercise by id/name.
+- `laoshi_create_activity` / `laoshi_update_activity` — save or revise student-created lesson/exercise markdown assets.
 - `laoshi_start_activity` / `laoshi_finish_activity` — track current activity.
 - `laoshi_record_evaluation` — save rubric scores and feedback.
 - `laoshi_due_review` — fetch due vocabulary for spaced repetition.
@@ -202,13 +208,14 @@ Design notes:
 
 - Implement `laoshi_upsert_vocab`, `laoshi_record_vocab_event`, and profile summary.
 - Inject learner context into agent turns.
-- Manually test casual Chinese chat and vocabulary persistence.
+- Manually test casual Mandarin chat and vocabulary persistence.
 
 ### Milestone 3 — Lesson/Exercise Runner
 
 - Define lesson markdown format.
 - Implement lesson discovery and loading tools.
 - Add starter beginner lessons.
+- Support student-created lesson/exercise files, including create/update tools and safe filename/id validation.
 - Support natural-language lesson triggering by exposing lesson catalog in prompt context.
 
 ### Milestone 4 — Evaluation and Review
@@ -231,5 +238,6 @@ Design notes:
 - Resolved: store the database under `~/.pi/agent/laoshi/` by default because Pi's global agent resources and settings live under `~/.pi/agent/`.
 - Resolved: vocabulary extraction and progress recording should be explicit via pi-laoshi tools only for the MVP. This keeps DB writes intentional, auditable, and less noisy; automatic extraction can be considered later as an opt-in candidate-suggestion layer.
 - Resolved: start with simple interval-based due dates for the MVP, while shaping the schema so SM-2 can be added without migration pain. Store scheduling metadata such as interval, ease factor, review count, lapse count, last reviewed time, and due time.
-- Should lesson content be global/package-provided only, or should project-local lesson directories also be supported?
+- Resolved: lesson content should support both package-provided lessons and student-created custom lessons/exercises.
+- Should custom lesson content be stored only under `~/.pi/agent/laoshi/`, or should project-local lesson directories also be supported?
 - Which blob storage providers should be supported first, and should the sync layer use provider-specific SDKs or a generic object-store abstraction?
