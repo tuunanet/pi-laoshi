@@ -18,6 +18,7 @@ Use a dedicated application directory under Pi's agent area:
 ```text
 ~/.pi/agent/laoshi/
 ├── learning.duckdb
+├── state/              # non-DB learner state, sync metadata, settings
 ├── backups/
 └── exports/
 ```
@@ -25,6 +26,8 @@ Use a dedicated application directory under Pi's agent area:
 Default database file: `~/.pi/agent/laoshi/learning.duckdb`.
 
 Allow override via environment variable or setting, e.g. `PI_LAOSHI_DB_PATH`.
+
+All learner-state data that affects teaching decisions should live under this directory so it can be backed up and synchronized together. This includes DuckDB state, lesson/activity metadata, sync manifests, and any future scheduler/profile state files.
 
 ## Pi Integration Approach
 
@@ -41,6 +44,7 @@ Implement pi-laoshi as a Pi package/project that can provide:
 
 3. **Prompt templates** (`.pi/prompts/` or package `prompts/`)
    - Optional slash-command shortcuts for common flows such as `/chinese-chat`, `/conversation-practice`, `/review-vocab`.
+   - State management commands: `/laoshi-sync`, `/laoshi-export`, and `/laoshi-import`.
 
 4. **Lesson/exercise markdown assets**
    - Versioned pre-scripted markdown lesson files stored in the project/package, for example:
@@ -161,6 +165,28 @@ Likely custom extension tools:
 - `laoshi_start_activity` / `laoshi_finish_activity` — track current activity.
 - `laoshi_record_evaluation` — save rubric scores and feedback.
 - `laoshi_due_review` — fetch due vocabulary for spaced repetition.
+- `laoshi_sync_state` — synchronize the local learner state directory with configured blob storage.
+- `laoshi_export_state` — create a portable backup/archive of DuckDB and related learner state.
+- `laoshi_import_state` — restore learner state from a backup/archive.
+
+### 5. State Synchronization and Backup
+
+Support keeping multiple computers reasonably in sync with the same learner state.
+
+Slash commands:
+
+- `/laoshi-sync` — synchronize `~/.pi/agent/laoshi/` with a configured blob storage account.
+- `/laoshi-export` — export a backup archive containing `learning.duckdb` and all related state files.
+- `/laoshi-import` — import a backup archive and restore local learner state.
+
+Design notes:
+
+- Treat `~/.pi/agent/laoshi/` as the authoritative state bundle; avoid scattering learner progress elsewhere.
+- Before sync/export, create a consistent DuckDB checkpoint or snapshot and avoid copying a database while writes are active.
+- Keep a local sync manifest with device id, last synced revision/time, and content checksums.
+- Prefer simple last-writer-wins or explicit conflict files for the MVP; do not silently merge divergent DuckDB files.
+- Store blob credentials/config outside exported learner backups unless the user explicitly asks to include them.
+- Ensure import makes a timestamped local backup before replacing current state.
 
 ## Milestones
 
@@ -196,8 +222,9 @@ Likely custom extension tools:
 
 - Package as a Pi package with extension, skill, prompts, and content.
 - Add setup documentation.
-- Add export/backup command for learner data.
-- Add tests for DB migrations, markdown parsing, and tool behavior.
+- Add `/laoshi-sync` command for synchronizing DuckDB and related state through blob storage.
+- Add `/laoshi-export` and `/laoshi-import` commands for portable learner-state backups.
+- Add tests for DB migrations, markdown parsing, tool behavior, sync manifests, and backup/restore flows.
 
 ## Open Design Questions
 
@@ -205,3 +232,4 @@ Likely custom extension tools:
 - Resolved: vocabulary extraction and progress recording should be explicit via pi-laoshi tools only for the MVP. This keeps DB writes intentional, auditable, and less noisy; automatic extraction can be considered later as an opt-in candidate-suggestion layer.
 - Resolved: start with simple interval-based due dates for the MVP, while shaping the schema so SM-2 can be added without migration pain. Store scheduling metadata such as interval, ease factor, review count, lapse count, last reviewed time, and due time.
 - Should lesson content be global/package-provided only, or should project-local lesson directories also be supported?
+- Which blob storage providers should be supported first, and should the sync layer use provider-specific SDKs or a generic object-store abstraction?
