@@ -20,7 +20,8 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest --run",
-    "coverage": "vitest --run --coverage"
+    "coverage": "vitest --run --coverage",
+    "smoke": "node scripts/smoke-package.mjs"
   },
   "dependencies": {
     "@azure/storage-blob": "^12.32.0",
@@ -56,6 +57,7 @@
     "skills",
     "prompts",
     "src",
+    "scripts",
     "LICENSE",
     "README.md"
   ],
