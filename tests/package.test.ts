@@ -30,10 +30,11 @@ describe("pi package resources", () => {
     }
   });
 
-  it("keeps prompt templates documented with frontmatter descriptions", async () => {
+  it("keeps prompt templates documented and free of unsupported argument defaults", async () => {
     for (const file of await markdownFiles("prompts")) {
       const markdown = await readFile(file, "utf8");
       expect(markdown, file).toMatch(/^---\n[\s\S]*description:\s*.+[\s\S]*\n---\n/u);
+      expect(markdown, file).not.toMatch(/\$\{ARGUMENTS[^}]*\}/u);
     }
   });
 
