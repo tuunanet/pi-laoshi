@@ -100,11 +100,6 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     db.close();
   });
 
-  pi.on("resources_discover", async () => ({
-    skillPaths: [new URL("../../skills", import.meta.url).pathname],
-    promptPaths: [new URL("../../prompts", import.meta.url).pathname],
-  }));
-
   pi.on("before_agent_start", async (event) => {
     const profile = await db.profileSummary();
     const lessons = await listActivities();
