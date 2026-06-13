@@ -135,6 +135,76 @@ describe("state sync helpers", () => {
     }
   });
 
+  it("pulls remote state explicitly after making a local backup", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "pi-laoshi-sync-pull-"));
+    try {
+      await writeFile(join(stateDir, "learning.duckdb"), "local-db");
+      blobStore.set("sync/manifest.json", Buffer.from(JSON.stringify({
+        format: "pi-laoshi-sync-v1",
+        revision: "remote-rev",
+        device_id: "device-remote",
+        created_at: new Date().toISOString(),
+        files: [
+          { path: "content/lessons/custom.md", bytes: 13, sha256: "1".repeat(64) },
+          { path: "learning.duckdb", bytes: 9, sha256: "0".repeat(64) },
+        ],
+      })));
+      blobStore.set("files/learning.duckdb", Buffer.from("remote-db"));
+      blobStore.set("files/content/lessons/custom.md", Buffer.from("remote-lesson"));
+
+      const result = await syncState({
+        stateDir,
+        direction: "pull",
+        config: { connectionString: "UseDevelopmentStorage=true", containerName: "laoshi" },
+      });
+
+      expect(result.status).toBe("pulled");
+      if (result.status === "pulled") expect(result.prePullBackupPath).toContain(join(stateDir, "backups"));
+      await expect(readFile(join(stateDir, "learning.duckdb"), "utf8")).resolves.toBe("remote-db");
+      await expect(readFile(join(stateDir, "content", "lessons", "custom.md"), "utf8")).resolves.toBe("remote-lesson");
+      const localState = await readLocalSyncState(stateDir);
+      expect(localState?.last_remote_revision).toBe("remote-rev");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects unsafe remote manifest paths during pull", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "pi-laoshi-sync-unsafe-"));
+    try {
+      await writeFile(join(stateDir, "learning.duckdb"), "local-db");
+      blobStore.set("sync/manifest.json", Buffer.from(JSON.stringify({
+        format: "pi-laoshi-sync-v1",
+        revision: "remote-rev",
+        device_id: "device-remote",
+        created_at: new Date().toISOString(),
+        files: [{ path: "../evil", bytes: 4, sha256: "0".repeat(64) }],
+      })));
+      await expect(syncState({
+        stateDir,
+        direction: "pull",
+        config: { connectionString: "UseDevelopmentStorage=true", containerName: "laoshi" },
+      })).rejects.toThrow(/Unsafe sync manifest path/);
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports no remote state for explicit pull when remote manifest is missing", async () => {
+    const stateDir = await mkdtemp(join(tmpdir(), "pi-laoshi-sync-no-remote-"));
+    try {
+      await writeFile(join(stateDir, "learning.duckdb"), "local-db");
+      const result = await syncState({
+        stateDir,
+        direction: "pull",
+        config: { connectionString: "UseDevelopmentStorage=true", containerName: "laoshi" },
+      });
+      expect(result.status).toBe("no-remote");
+    } finally {
+      await rm(stateDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not overwrite existing remote state from a new local device", async () => {
     const stateDir = await mkdtemp(join(tmpdir(), "pi-laoshi-sync-new-device-"));
     try {

@@ -200,13 +200,15 @@ export default function laoshiExtension(pi: ExtensionAPI) {
   pi.registerCommand("laoshi-sync", {
     description: "Manually synchronize pi-laoshi learner state with configured Azure Blob Storage",
     handler: async (args, ctx) => {
-      const dryRun = args.trim() === "--dry-run";
+      const syncArgs = args.trim().split(/\s+/u).filter(Boolean);
+      const dryRun = syncArgs.includes("--dry-run");
+      const direction = syncArgs.includes("pull") ? "pull" as const : undefined;
       try {
-        const result = await withClosedDatabase(() => syncState({ dryRun }));
+        const result = await withClosedDatabase(() => syncState({ dryRun, direction }));
         const message = result.status === "needs-import"
           ? "pi-laoshi sync needs-import: remote state exists; local state was not uploaded"
           : `pi-laoshi sync ${result.status}`;
-        ctx.ui.notify(message, result.status === "conflict" || result.status === "needs-import" ? "warning" : "info");
+        ctx.ui.notify(message, ["conflict", "needs-import", "no-remote"].includes(result.status) ? "warning" : "info");
       } catch (error) {
         ctx.ui.notify(`pi-laoshi sync failed: ${errorMessage(error)}`, "error");
       }
@@ -461,9 +463,12 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     description: "Synchronize local pi-laoshi learner state with configured Azure Blob Storage.",
     promptSnippet: "Synchronize pi-laoshi learner state with Azure Blob Storage",
     promptGuidelines: ["Use laoshi_sync_state when the learner asks to run manual pi-laoshi sync."],
-    parameters: Type.Object({ dry_run: Type.Optional(Type.Boolean()) }),
+    parameters: Type.Object({
+      dry_run: Type.Optional(Type.Boolean()),
+      direction: Type.Optional(Type.Union([Type.Literal("auto"), Type.Literal("pull")])),
+    }),
     async execute(_toolCallId, params) {
-      const result = await withClosedDatabase(() => syncState({ dryRun: params.dry_run }));
+      const result = await withClosedDatabase(() => syncState({ dryRun: params.dry_run, direction: params.direction }));
       return textResult(`pi-laoshi sync ${result.status}`, result);
     },
   });

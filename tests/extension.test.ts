@@ -1,7 +1,30 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+const extensionBlobStore = vi.hoisted(() => new Map<string, Buffer>());
+
+vi.mock("@azure/storage-blob", () => ({
+  BlobServiceClient: {
+    fromConnectionString: vi.fn(() => ({
+      getContainerClient: vi.fn(() => ({
+        createIfNotExists: vi.fn(async () => undefined),
+        getBlockBlobClient: vi.fn((name: string) => ({
+          exists: vi.fn(async () => extensionBlobStore.has(name)),
+          downloadToBuffer: vi.fn(async () => extensionBlobStore.get(name) ?? Buffer.from("")),
+          uploadFile: vi.fn(async (path: string) => {
+            extensionBlobStore.set(name, await readFile(path));
+          }),
+          upload: vi.fn(async (data: string) => {
+            extensionBlobStore.set(name, Buffer.from(data));
+          }),
+        })),
+      })),
+    })),
+  },
+}));
+
 import laoshiExtension from "../extensions/laoshi/index.js";
 import { LaoshiDatabase } from "../src/db.js";
 
@@ -43,6 +66,7 @@ function createMockPi() {
 }
 
 beforeEach(async () => {
+  extensionBlobStore.clear();
   tempDir = await mkdtemp(join(tmpdir(), "pi-laoshi-extension-"));
   oldDbPath = process.env.PI_LAOSHI_DB_PATH;
   oldStateDir = process.env.PI_LAOSHI_STATE_DIR;
@@ -115,6 +139,30 @@ describe("laoshi extension", () => {
       expect(closeSpy).toHaveBeenCalledTimes(3);
     } finally {
       closeSpy.mockRestore();
+      if (oldContainer === undefined) delete process.env.PI_LAOSHI_AZURE_CONTAINER;
+      else process.env.PI_LAOSHI_AZURE_CONTAINER = oldContainer;
+      if (oldConnection === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING;
+      else process.env.AZURE_STORAGE_CONNECTION_STRING = oldConnection;
+    }
+  });
+
+  it("supports explicit pull sync command and tool mode", async () => {
+    const oldContainer = process.env.PI_LAOSHI_AZURE_CONTAINER;
+    const oldConnection = process.env.AZURE_STORAGE_CONNECTION_STRING;
+    try {
+      process.env.PI_LAOSHI_AZURE_CONTAINER = "laoshi";
+      process.env.AZURE_STORAGE_CONNECTION_STRING = "UseDevelopmentStorage=true";
+      const pi = createMockPi();
+      laoshiExtension(pi);
+
+      await pi.commands.get("laoshi-sync")?.handler("pull", pi.commandContext);
+      expect(pi.notifications.at(-1)).toMatchObject({ level: "warning" });
+      expect(pi.notifications.at(-1)?.message).toContain("no-remote");
+
+      const syncTool = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_sync_state");
+      const toolResult = await syncTool.execute("tool-call", { direction: "pull" });
+      expect(toolResult.content[0].text).toContain("no-remote");
+    } finally {
       if (oldContainer === undefined) delete process.env.PI_LAOSHI_AZURE_CONTAINER;
       else process.env.PI_LAOSHI_AZURE_CONTAINER = oldContainer;
       if (oldConnection === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING;

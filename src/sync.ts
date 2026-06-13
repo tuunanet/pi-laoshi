@@ -1,9 +1,9 @@
 import { BlobServiceClient } from "@azure/storage-blob";
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { defaultLaoshiStateDir, ensureLaoshiStateDirs } from "./paths.js";
-import { listStateFiles } from "./backup.js";
+import { exportLaoshiState, listStateFiles } from "./backup.js";
 
 export interface SyncFileManifest {
   path: string;
@@ -31,10 +31,17 @@ export interface LocalSyncState {
   last_synced_at?: string;
 }
 
+export type SyncDirection = "auto" | "pull";
+
 export interface SyncOptions {
   stateDir?: string;
   config?: AzureSyncConfig;
   dryRun?: boolean;
+  direction?: SyncDirection;
+}
+
+function timestamp(): string {
+  return new Date().toISOString().replace(/[:.]/gu, "-");
 }
 
 function trimSlashes(value: string): string {
@@ -44,6 +51,12 @@ function trimSlashes(value: string): string {
 function blobName(config: AzureSyncConfig, path: string): string {
   const prefix = config.prefix ? trimSlashes(config.prefix) : "";
   return prefix ? `${prefix}/${path}` : path;
+}
+
+function assertSafeManifestPath(path: string): void {
+  if (!path || path.startsWith("/") || path.includes("..") || path.split("/").includes("")) {
+    throw new Error(`Unsafe sync manifest path: ${path}`);
+  }
 }
 
 export function getAzureSyncConfigFromEnv(env: NodeJS.ProcessEnv = process.env): AzureSyncConfig {
@@ -110,15 +123,38 @@ async function uploadState(config: AzureSyncConfig, stateDir: string, manifest: 
   const container = service.getContainerClient(config.containerName);
   await container.createIfNotExists();
   for (const file of manifest.files) {
+    assertSafeManifestPath(file.path);
     await container.getBlockBlobClient(blobName(config, `files/${file.path}`)).uploadFile(join(stateDir, file.path), {
       blobHTTPHeaders: { blobContentType: "application/octet-stream" },
     });
   }
+  const manifestJson = JSON.stringify(manifest, null, 2);
   await container
     .getBlockBlobClient(blobName(config, "sync/manifest.json"))
-    .upload(JSON.stringify(manifest, null, 2), Buffer.byteLength(JSON.stringify(manifest, null, 2)), {
+    .upload(manifestJson, Buffer.byteLength(manifestJson), {
       blobHTTPHeaders: { blobContentType: "application/json" },
     });
+}
+
+async function clearPulledState(stateDir: string): Promise<void> {
+  const entries = await readdir(stateDir, { withFileTypes: true });
+  await Promise.all(
+    entries
+      .filter((entry) => entry.name !== "backups" && entry.name !== "exports")
+      .map((entry) => rm(join(stateDir, entry.name), { recursive: true, force: true })),
+  );
+}
+
+async function downloadState(config: AzureSyncConfig, stateDir: string, manifest: SyncManifest): Promise<void> {
+  const service = BlobServiceClient.fromConnectionString(config.connectionString);
+  const container = service.getContainerClient(config.containerName);
+  for (const file of manifest.files) {
+    assertSafeManifestPath(file.path);
+    const data = await container.getBlockBlobClient(blobName(config, `files/${file.path}`)).downloadToBuffer();
+    const outputPath = join(stateDir, file.path);
+    await mkdir(dirname(outputPath), { recursive: true });
+    await writeFile(outputPath, data);
+  }
 }
 
 export async function syncState(options: SyncOptions = {}) {
@@ -131,6 +167,23 @@ export async function syncState(options: SyncOptions = {}) {
   if (options.dryRun) return { status: "dry-run" as const, localManifest };
 
   const remoteManifest = await downloadRemoteManifest(config);
+  if (options.direction === "pull") {
+    if (!remoteManifest) return { status: "no-remote" as const, localManifest };
+    const prePullBackupPath = (await exportLaoshiState({
+      stateDir,
+      outputPath: join(stateDir, "backups", `pre-pull-${timestamp()}.json.gz`),
+    })).archivePath;
+    await clearPulledState(stateDir);
+    await downloadState(config, stateDir, remoteManifest);
+    await ensureLaoshiStateDirs(stateDir);
+    await writeLocalSyncState(stateDir, {
+      device_id: localState.device_id,
+      last_remote_revision: remoteManifest.revision,
+      last_synced_at: new Date().toISOString(),
+    });
+    return { status: "pulled" as const, prePullBackupPath, localManifest, remoteManifest };
+  }
+
   if (remoteManifest && !localState.last_remote_revision) {
     return { status: "needs-import" as const, localManifest, remoteManifest };
   }

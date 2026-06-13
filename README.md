@@ -39,6 +39,8 @@ Azure Blob sync uses:
 - `PI_LAOSHI_AZURE_CONNECTION_STRING` or `AZURE_STORAGE_CONNECTION_STRING`
 - optional `PI_LAOSHI_AZURE_PREFIX`
 
+`/laoshi-sync` uploads when safe. If remote state exists on a new local device it reports `needs-import` instead of overwriting; use `/laoshi-sync pull` to explicitly pull remote state after a local pre-pull backup is created.
+
 ## Planned features
 
 - More beginner lessons and exercises
