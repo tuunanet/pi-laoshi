@@ -1,7 +1,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { LaoshiDatabase } from "../../src/db.js";
-import { listActivities, loadActivity } from "../../src/content.js";
+import { listActivities, loadActivity, saveCustomActivity } from "../../src/content.js";
 
 const StatusSchema = Type.Union([
   Type.Literal("introduced"),
@@ -19,6 +19,11 @@ const EventTypeSchema = Type.Union([
   Type.Literal("reviewed"),
 ]);
 
+const ActivityKindSchema = Type.Union([
+  Type.Literal("lesson"),
+  Type.Literal("exercise"),
+]);
+
 const ActivityTypeSchema = Type.Union([
   Type.Literal("chat"),
   Type.Literal("conversation"),
@@ -34,10 +39,37 @@ const EvaluationDimensionSchema = Type.Union([
   Type.Literal("pinyin"),
   Type.Literal("fluency"),
   Type.Literal("comprehension"),
+  Type.Literal("listening"),
+  Type.Literal("speaking"),
+  Type.Literal("reading"),
+  Type.Literal("writing"),
+  Type.Literal("handwriting"),
 ]);
+
+const ActivitySaveSchema = Type.Object({
+  id: Type.String({ description: "Lowercase id such as greetings-2" }),
+  type: ActivityKindSchema,
+  title: Type.String(),
+  level: Type.String(),
+  target_vocab: Type.Optional(Type.Array(Type.String())),
+  estimated_minutes: Type.Optional(Type.Number({ minimum: 1, maximum: 120 })),
+  body: Type.String({ description: "Markdown body with objective, script, practice, rubric, and recording instructions" }),
+});
 
 function textResult(text: string, details?: Record<string, unknown>) {
   return { content: [{ type: "text" as const, text }], details };
+}
+
+function parseSettingsArgs(args: string): Array<{ key: string; value: string }> {
+  return args
+    .trim()
+    .split(/\s+/u)
+    .filter(Boolean)
+    .map((pair) => {
+      const index = pair.indexOf("=");
+      if (index <= 0) throw new Error(`Expected key=value, got: ${pair}`);
+      return { key: pair.slice(0, index), value: pair.slice(index + 1) };
+    });
 }
 
 export default function laoshiExtension(pi: ExtensionAPI) {
@@ -61,16 +93,71 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     const profile = await db.profileSummary();
     const lessons = await listActivities();
     return {
-      systemPrompt: `${event.systemPrompt}\n\n## pi-laoshi learner context\nUse the pi-laoshi tools to persist vocabulary, activity, and evaluation progress when teaching Chinese. Distinguish introduced vocabulary from vocabulary the learner has produced correctly.\n\nCurrent learner profile:\n${JSON.stringify(profile, null, 2)}\n\nAvailable pi-laoshi activities:\n${JSON.stringify(lessons, null, 2)}\n`,
+      systemPrompt: `${event.systemPrompt}\n\n## pi-laoshi learner context\nUse the pi-laoshi tools to persist vocabulary, activity, handwriting, settings, and evaluation progress when teaching Standard Mandarin (Putonghua). Respect pinyin_visibility from learner settings. Distinguish introduced vocabulary from vocabulary the learner has produced correctly. Convert Traditional Chinese input/content to Simplified for learner-facing materials and tracking.\n\nCurrent learner profile:\n${JSON.stringify(profile, null, 2)}\n\nAvailable pi-laoshi activities (custom items are editable; package items are read-only):\n${JSON.stringify(lessons, null, 2)}\n`,
     };
+  });
+
+  pi.registerCommand("laoshi-pinyin", {
+    description: "Set pinyin visibility: on, off, or hints-only",
+    handler: async (args, ctx) => {
+      const value = args.trim();
+      if (!["on", "off", "hints-only"].includes(value)) {
+        ctx.ui.notify("Usage: /laoshi-pinyin on|off|hints-only", "warning");
+        return;
+      }
+      await db.updateSetting({ key: "pinyin_visibility", value });
+      ctx.ui.notify(`pi-laoshi pinyin visibility set to ${value}`, "info");
+    },
+  });
+
+  pi.registerCommand("laoshi-settings", {
+    description: "Show or update pi-laoshi settings. Example: /laoshi-settings review_size=8",
+    handler: async (args, ctx) => {
+      if (!args.trim()) {
+        const settings = await db.getSettings();
+        ctx.ui.notify(`pi-laoshi settings: ${JSON.stringify(settings)}`, "info");
+        return;
+      }
+      const updated = await db.updateSettings(parseSettingsArgs(args));
+      ctx.ui.notify(`Updated pi-laoshi settings: ${updated.map((s) => `${s.key}=${s.value}`).join(", ")}`, "info");
+    },
+  });
+
+  pi.registerCommand("laoshi-lesson", {
+    description: "Start a named Mandarin lesson/exercise or list available activities",
+    handler: async (args, ctx) => {
+      const request = args.trim() || "list available lessons and exercises";
+      pi.sendUserMessage(`Use pi-laoshi tools to ${request === "list available lessons and exercises" ? request : `start the lesson or exercise named \"${request}\"`}.`);
+    },
+  });
+
+  pi.registerCommand("laoshi-review", {
+    description: "Start a short due-vocabulary review",
+    handler: async (_args, ctx) => {
+      pi.sendUserMessage("Use pi-laoshi tools to start a short due-vocabulary review session. Ask before introducing new material.");
+    },
+  });
+
+  pi.registerCommand("laoshi-evaluate", {
+    description: "Evaluate learner progress and recommend next Mandarin activities",
+    handler: async (_args, ctx) => {
+      pi.sendUserMessage("Use laoshi_evaluate_learner to evaluate my Mandarin progress, strengths, weaknesses, and recommended next lessons.");
+    },
+  });
+
+  pi.registerCommand("laoshi-handwriting", {
+    description: "Start handwriting or character-writing practice",
+    handler: async (args, ctx) => {
+      pi.sendUserMessage(`Start a pi-laoshi handwriting practice session${args.trim() ? ` for: ${args.trim()}` : ""}. If I attach an image, evaluate it and record handwriting feedback.`);
+    },
   });
 
   pi.registerTool({
     name: "laoshi_get_profile",
     label: "Laoshi Profile",
-    description: "Summarize the learner's Chinese vocabulary, due reviews, and evaluation averages.",
-    promptSnippet: "Summarize pi-laoshi learner progress and due vocabulary reviews",
-    promptGuidelines: ["Use laoshi_get_profile before adapting Chinese lesson difficulty or planning review."],
+    description: "Summarize the learner's Chinese vocabulary, due reviews, settings, and evaluation averages.",
+    promptSnippet: "Summarize pi-laoshi learner progress, settings, and due vocabulary reviews",
+    promptGuidelines: ["Use laoshi_get_profile before adapting Mandarin lesson difficulty or planning review."],
     parameters: Type.Object({}),
     async execute() {
       const profile = await db.profileSummary();
@@ -81,12 +168,12 @@ export default function laoshiExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "laoshi_upsert_vocab",
     label: "Laoshi Upsert Vocabulary",
-    description: "Add or update a Chinese vocabulary entry in the learner database.",
-    promptSnippet: "Add or update Chinese vocabulary progress",
-    promptGuidelines: ["Use laoshi_upsert_vocab when new Chinese words are taught or an existing word status changes."],
+    description: "Add or update a Simplified Chinese vocabulary entry in the learner database.",
+    promptSnippet: "Add or update Simplified Chinese vocabulary progress",
+    promptGuidelines: ["Use laoshi_upsert_vocab when new Mandarin words are taught or an existing word status changes."],
     parameters: Type.Object({
       simplified: Type.String({ description: "Simplified Chinese word or phrase" }),
-      traditional: Type.Optional(Type.String()),
+      traditional: Type.Optional(Type.String({ description: "Only for source/reference; learner tracking remains Simplified-first" })),
       pinyin: Type.Optional(Type.String()),
       english_gloss: Type.Optional(Type.String()),
       part_of_speech: Type.Optional(Type.String()),
@@ -105,8 +192,8 @@ export default function laoshiExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "laoshi_record_vocab_event",
     label: "Laoshi Record Vocabulary Event",
-    description: "Record a learner interaction with a vocabulary item.",
-    promptSnippet: "Record Chinese vocabulary recognition, production, correction, or review events",
+    description: "Record a learner interaction with a vocabulary item and update simple spaced-review scheduling when scored.",
+    promptSnippet: "Record Mandarin vocabulary recognition, production, correction, or review events",
     promptGuidelines: ["Use laoshi_record_vocab_event when the learner recognizes, produces, reviews, or is corrected on a vocabulary item."],
     parameters: Type.Object({
       vocab_id: Type.Optional(Type.String()),
@@ -126,8 +213,8 @@ export default function laoshiExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "laoshi_list_lessons",
     label: "Laoshi List Lessons",
-    description: "List available pi-laoshi lessons and exercises.",
-    promptSnippet: "List available Chinese lessons and exercises",
+    description: "List available package and custom pi-laoshi lessons and exercises.",
+    promptSnippet: "List available Mandarin lessons and exercises",
     promptGuidelines: ["Use laoshi_list_lessons when the learner asks what lessons or exercises are available."],
     parameters: Type.Object({}),
     async execute() {
@@ -140,8 +227,8 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     name: "laoshi_load_activity",
     label: "Laoshi Load Activity",
     description: "Load a specific pi-laoshi lesson or exercise by id or exact title.",
-    promptSnippet: "Load a Chinese lesson or exercise markdown script",
-    promptGuidelines: ["Use laoshi_load_activity when starting a named Chinese lesson or exercise."],
+    promptSnippet: "Load a Mandarin lesson or exercise markdown script",
+    promptGuidelines: ["Use laoshi_load_activity when starting a named Mandarin lesson or exercise."],
     parameters: Type.Object({ id_or_title: Type.String() }),
     async execute(_toolCallId, params) {
       const activity = await loadActivity(params.id_or_title);
@@ -151,10 +238,36 @@ export default function laoshiExtension(pi: ExtensionAPI) {
   });
 
   pi.registerTool({
+    name: "laoshi_create_activity",
+    label: "Laoshi Create Activity",
+    description: "Create a student-editable custom Mandarin lesson or exercise under the pi-laoshi state directory.",
+    promptSnippet: "Create a custom Mandarin lesson or exercise",
+    promptGuidelines: ["Use laoshi_create_activity when the learner asks to save a custom lesson or exercise."],
+    parameters: ActivitySaveSchema,
+    async execute(_toolCallId, params) {
+      const activity = await saveCustomActivity(params, { overwrite: false });
+      return textResult(`Created custom ${params.type}: ${activity.id}`, { activity });
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_update_activity",
+    label: "Laoshi Update Activity",
+    description: "Update or create a student-editable custom Mandarin lesson or exercise under the pi-laoshi state directory.",
+    promptSnippet: "Update a custom Mandarin lesson or exercise",
+    promptGuidelines: ["Use laoshi_update_activity when the learner asks to revise a custom lesson or exercise."],
+    parameters: ActivitySaveSchema,
+    async execute(_toolCallId, params) {
+      const activity = await saveCustomActivity(params, { overwrite: true });
+      return textResult(`Saved custom ${params.type}: ${activity.id}`, { activity });
+    },
+  });
+
+  pi.registerTool({
     name: "laoshi_start_activity",
     label: "Laoshi Start Activity",
     description: "Record the start of a chat, conversation, lesson, exercise, or review activity.",
-    promptSnippet: "Start tracking a Chinese learning activity",
+    promptSnippet: "Start tracking a Mandarin learning activity",
     parameters: Type.Object({
       session_id: Type.Optional(Type.String()),
       activity_type: ActivityTypeSchema,
@@ -170,7 +283,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     name: "laoshi_finish_activity",
     label: "Laoshi Finish Activity",
     description: "Record completion of a pi-laoshi activity with an optional summary.",
-    promptSnippet: "Finish tracking a Chinese learning activity",
+    promptSnippet: "Finish tracking a Mandarin learning activity",
     parameters: Type.Object({ activity_id: Type.String(), summary: Type.Optional(Type.String()) }),
     async execute(_toolCallId, params) {
       const result = await db.finishActivity(params);
@@ -182,7 +295,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     name: "laoshi_record_evaluation",
     label: "Laoshi Record Evaluation",
     description: "Save a rubric score and feedback for a learning activity.",
-    promptSnippet: "Record Chinese learning evaluation scores",
+    promptSnippet: "Record Mandarin learning evaluation scores",
     parameters: Type.Object({
       activity_id: Type.String(),
       dimension: EvaluationDimensionSchema,
@@ -199,12 +312,86 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     name: "laoshi_due_review",
     label: "Laoshi Due Review",
     description: "Fetch vocabulary due for spaced review.",
-    promptSnippet: "Fetch due Chinese vocabulary review items",
+    promptSnippet: "Fetch due Mandarin vocabulary review items",
     promptGuidelines: ["Use laoshi_due_review when the learner asks to review vocabulary or when planning practice."],
     parameters: Type.Object({ limit: Type.Optional(Type.Number({ minimum: 1, maximum: 100 })) }),
     async execute(_toolCallId, params) {
       const due = await db.dueReview(params.limit ?? 10);
       return textResult(JSON.stringify(due, null, 2), { due });
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_get_settings",
+    label: "Laoshi Get Settings",
+    description: "Inspect pi-laoshi learner settings such as pinyin visibility, English assistance, and review size.",
+    promptSnippet: "Inspect pi-laoshi learner settings",
+    parameters: Type.Object({}),
+    async execute() {
+      const settings = await db.getSettings();
+      return textResult(JSON.stringify(settings, null, 2), { settings });
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_update_settings",
+    label: "Laoshi Update Settings",
+    description: "Update pi-laoshi learner settings.",
+    promptSnippet: "Update pinyin visibility, English assistance, review size, or practice-domain settings",
+    promptGuidelines: ["Use laoshi_update_settings when the learner asks to change pinyin visibility or other pi-laoshi preferences."],
+    parameters: Type.Object({
+      settings: Type.Array(Type.Object({ key: Type.String(), value: Type.String() })),
+    }),
+    async execute(_toolCallId, params) {
+      const updated = await db.updateSettings(params.settings);
+      return textResult(`Updated settings: ${updated.map((s) => s.key).join(", ")}`, { updated });
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_record_handwriting_event",
+    label: "Laoshi Record Handwriting Event",
+    description: "Record handwritten character practice, corrections, generated drill feedback, and progress.",
+    promptSnippet: "Record Mandarin handwriting or character-writing feedback",
+    parameters: Type.Object({
+      session_id: Type.Optional(Type.String()),
+      image_ref: Type.Optional(Type.String()),
+      recognized_text: Type.Optional(Type.String()),
+      target_text: Type.Optional(Type.String()),
+      correction_feedback: Type.Optional(Type.String()),
+      drill_feedback: Type.Optional(Type.String()),
+      score: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+    }),
+    async execute(_toolCallId, params) {
+      const event = await db.recordHandwritingEvent(params);
+      return textResult("Recorded handwriting event", { event });
+    },
+  });
+
+  pi.registerTool({
+    name: "laoshi_evaluate_learner",
+    label: "Laoshi Evaluate Learner",
+    description: "Evaluate the historical learner database and infer current level, strengths, weaknesses, and recommended next lessons.",
+    promptSnippet: "Evaluate Mandarin learner progress and recommend next pi-laoshi lessons",
+    promptGuidelines: ["Use laoshi_evaluate_learner for /laoshi-evaluate or when the learner asks for progress assessment."],
+    parameters: Type.Object({}),
+    async execute() {
+      const profile = await db.profileSummary();
+      const activities = await listActivities();
+      const counts = profile.vocabulary_counts as Array<{ status: string; count: number }>;
+      const totalVocab = counts.reduce((sum, row) => sum + Number(row.count ?? 0), 0);
+      const dueCount = (profile.due_reviews as unknown[]).length;
+      const recommendations = activities
+        .filter((activity) => ["pinyin-basics", "greetings-1", "numbers-1", "introduce-yourself"].includes(activity.id))
+        .slice(0, totalVocab < 15 ? 4 : 2);
+      const evaluation = {
+        inferred_level: totalVocab < 40 ? "beginner" : "beginner-plus",
+        strengths: totalVocab > 0 ? ["Vocabulary tracking has started"] : [],
+        weaknesses: totalVocab === 0 ? ["No recorded vocabulary yet"] : dueCount > 0 ? ["Some vocabulary is due for review"] : [],
+        recommended_next_activities: recommendations,
+        profile,
+      };
+      return textResult(JSON.stringify(evaluation, null, 2), evaluation);
     },
   });
 }
