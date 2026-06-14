@@ -47,7 +47,7 @@ export interface VocabEventInput {
   event_type: VocabEventType;
   student_answer?: string;
   teacher_feedback?: string;
-  score?: number;
+  score?: number | null;
 }
 
 export interface StartActivityInput {
@@ -93,6 +93,7 @@ function isoDaysFromNow(days: number): string {
 
 export class LaoshiDatabase {
   private connection?: DuckDBConnection;
+  private instance?: DuckDBInstance;
 
   constructor(private readonly dbPath = defaultDbPath()) {}
 
@@ -107,6 +108,7 @@ export class LaoshiDatabase {
       await ensureLaoshiStateDirs(dirname(this.dbPath));
     }
     const instance = await DuckDBInstance.fromCache(this.dbPath);
+    this.instance = instance;
     this.connection = await instance.connect();
     await this.migrate();
     return this.connection;
@@ -115,6 +117,8 @@ export class LaoshiDatabase {
   close(): void {
     this.connection?.closeSync();
     this.connection = undefined;
+    this.instance?.closeSync();
+    this.instance = undefined;
   }
 
   async migrate(): Promise<void> {
@@ -291,7 +295,7 @@ export class LaoshiDatabase {
     const db = await this.connect();
     await db.run("UPDATE vocabulary SET last_seen_at = current_timestamp WHERE id = $vocab_id", { vocab_id: vocabId });
 
-    if (input.score === undefined) return;
+    if (typeof input.score !== "number" || !Number.isFinite(input.score)) return;
     const row = await this.getVocabById(vocabId);
     if (!row) return;
 

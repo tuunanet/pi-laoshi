@@ -1,6 +1,8 @@
+import { rm } from "node:fs/promises";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { LaoshiDatabase } from "../../src/db.js";
+import { defaultDbPath, ensureLaoshiStateDirs } from "../../src/paths.js";
 import { listActivities, loadActivity, saveCustomActivity } from "../../src/content.js";
 import { exportLaoshiState, importLaoshiState } from "../../src/backup.js";
 import { syncState } from "../../src/sync.js";
@@ -91,6 +93,21 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     }
   }
 
+  async function resetDuckDbState(): Promise<string> {
+    db.close();
+    const dbPath = defaultDbPath();
+    if (dbPath !== ":memory:") {
+      await ensureLaoshiStateDirs();
+      await Promise.all([
+        rm(dbPath, { force: true }),
+        rm(`${dbPath}.wal`, { force: true }),
+        rm(`${dbPath}.tmp`, { force: true }),
+      ]);
+    }
+    await db.connect();
+    return dbPath;
+  }
+
   pi.on("session_start", async (_event, ctx) => {
     await db.connect();
     ctx.ui.setStatus("pi-laoshi", "laoshi ready");
@@ -104,7 +121,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     const profile = await db.profileSummary();
     const lessons = await listActivities();
     return {
-      systemPrompt: `${event.systemPrompt}\n\n## pi-laoshi learner context\nUse the pi-laoshi tools to persist vocabulary, activity, handwriting, settings, and evaluation progress when teaching Standard Mandarin (Putonghua). Respect pinyin_visibility from learner settings. Distinguish introduced vocabulary from vocabulary the learner has produced correctly. Convert Traditional Chinese input/content to Simplified for learner-facing materials and tracking.\n\nCurrent learner profile:\n${JSON.stringify(profile, null, 2)}\n\nAvailable pi-laoshi activities (custom items are editable; package items are read-only):\n${JSON.stringify(lessons, null, 2)}\n`,
+      systemPrompt: `${event.systemPrompt}\n\n## pi-laoshi learner context\nUse the pi-laoshi tools to persist vocabulary, activity, handwriting, settings, and evaluation progress when teaching Standard Mandarin (Putonghua). Respect pinyin_visibility from learner settings. Distinguish introduced vocabulary from vocabulary the learner has produced correctly. Convert Traditional Chinese input/content to Simplified for learner-facing materials and tracking. For casual chat startup, do not persist new vocabulary or vocabulary events until the learner responds or explicitly asks to learn the word.\n\nCurrent learner profile:\n${JSON.stringify(profile, null, 2)}\n\nAvailable pi-laoshi activities (custom items are editable; package items are read-only):\n${JSON.stringify(lessons, null, 2)}\n`,
     };
   });
 
@@ -210,6 +227,27 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     },
   });
 
+  pi.registerCommand("laoshi-duckdb-reset", {
+    description: "Release the pi-laoshi DuckDB lock and reset the learner database",
+    handler: async (args, ctx) => {
+      if (!args.trim().split(/\s+/u).includes("--confirm")) {
+        ctx.ui.notify("Usage: /laoshi-duckdb-reset --confirm (destructive: deletes and recreates the pi-laoshi DuckDB database)", "warning");
+        return;
+      }
+      try {
+        const dbPath = await resetDuckDbState();
+        ctx.ui.notify(`Reset pi-laoshi DuckDB database: ${dbPath}`, "info");
+      } catch (error) {
+        try {
+          await db.connect();
+        } catch {
+          // Keep the original reset error as the user-facing failure.
+        }
+        ctx.ui.notify(`pi-laoshi DuckDB reset failed: ${errorMessage(error)}`, "error");
+      }
+    },
+  });
+
   pi.registerTool({
     name: "laoshi_get_profile",
     label: "Laoshi Profile",
@@ -228,7 +266,6 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     label: "Laoshi Upsert Vocabulary",
     description: "Add or update a Simplified Chinese vocabulary entry in the learner database.",
     promptSnippet: "Add or update Simplified Chinese vocabulary progress",
-    promptGuidelines: ["Use laoshi_upsert_vocab when new Mandarin words are taught or an existing word status changes."],
     parameters: Type.Object({
       simplified: Type.String({ description: "Simplified Chinese word or phrase" }),
       traditional: Type.Optional(Type.String({ description: "Only for source/reference; learner tracking remains Simplified-first" })),
@@ -241,6 +278,10 @@ export default function laoshiExtension(pi: ExtensionAPI) {
       ease_score: Type.Optional(Type.Number()),
       review_due_at: Type.Optional(Type.String({ description: "ISO timestamp for next review" })),
     }),
+    promptGuidelines: [
+      "Use after a word has been explicitly taught in an active lesson/review, when the learner asks to learn it, or after the learner engages with it in conversation.",
+      "Do not save optional preview words in the first turn of a casual chat before the learner responds.",
+    ],
     async execute(_toolCallId, params) {
       const vocab = await db.upsertVocab(params);
       return textResult(`Saved vocabulary: ${params.simplified}`, { vocab });
@@ -252,7 +293,11 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     label: "Laoshi Record Vocabulary Event",
     description: "Record a learner interaction with a vocabulary item and update simple spaced-review scheduling when scored.",
     promptSnippet: "Record Mandarin vocabulary recognition, production, correction, or review events",
-    promptGuidelines: ["Use laoshi_record_vocab_event when the learner recognizes, produces, reviews, or is corrected on a vocabulary item."],
+    promptGuidelines: [
+      "Use when the learner recognizes, produces, reviews, or is corrected on a vocabulary item.",
+      "Do not record teacher-only prompts as learner vocabulary events.",
+      "Only include score for a real numeric evaluation; omit it for unscored events.",
+    ],
     parameters: Type.Object({
       vocab_id: Type.Optional(Type.String()),
       simplified: Type.Optional(Type.String()),

@@ -88,6 +88,7 @@ describe("laoshi extension", () => {
     laoshiExtension(pi);
 
     expect([...pi.commands.keys()].sort()).toEqual([
+      "laoshi-duckdb-reset",
       "laoshi-evaluate",
       "laoshi-export",
       "laoshi-handwriting",
@@ -143,6 +144,35 @@ describe("laoshi extension", () => {
       else process.env.PI_LAOSHI_AZURE_CONTAINER = oldContainer;
       if (oldConnection === undefined) delete process.env.AZURE_STORAGE_CONNECTION_STRING;
       else process.env.AZURE_STORAGE_CONNECTION_STRING = oldConnection;
+    }
+  });
+
+  it("resets the DuckDB learner database after explicit confirmation", async () => {
+    const closeSpy = vi.spyOn(LaoshiDatabase.prototype, "close");
+    try {
+      const pi = createMockPi();
+      laoshiExtension(pi);
+
+      const upsertVocab = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_upsert_vocab");
+      await upsertVocab.execute("tool-call", { simplified: "你好", pinyin: "nǐ hǎo", english_gloss: "hello" });
+      const updateSettings = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_update_settings");
+      await updateSettings.execute("tool-call", { settings: [{ key: "pinyin_visibility", value: "off" }] });
+
+      await pi.commands.get("laoshi-duckdb-reset")?.handler("", pi.commandContext);
+      expect(pi.notifications.at(-1)).toMatchObject({ level: "warning" });
+
+      await pi.commands.get("laoshi-duckdb-reset")?.handler("--confirm", pi.commandContext);
+      expect(pi.notifications.at(-1)).toMatchObject({ level: "info" });
+      expect(closeSpy).toHaveBeenCalled();
+
+      const profileTool = pi.tools.find((tool: RegisteredTool) => tool.name === "laoshi_get_profile");
+      const profileResult = await profileTool.execute();
+      expect(profileResult.details.vocabulary_counts).toHaveLength(0);
+      expect(profileResult.details.settings).toEqual(expect.arrayContaining([
+        expect.objectContaining({ key: "pinyin_visibility", value: "hints-only" }),
+      ]));
+    } finally {
+      closeSpy.mockRestore();
     }
   });
 

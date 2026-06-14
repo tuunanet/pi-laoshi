@@ -82,6 +82,10 @@ describe("LaoshiDatabase", () => {
     vocab = await db.getVocabById(String(event.vocab_id));
     expect(vocab.review_count).toBe(1);
 
+    await db.recordVocabEvent({ vocab_id: String(event.vocab_id), event_type: "introduced", score: null });
+    vocab = await db.getVocabById(String(event.vocab_id));
+    expect(vocab.review_count).toBe(1);
+
     await db.recordVocabEvent({ vocab_id: String(event.vocab_id), event_type: "corrected", score: 0.2 });
     vocab = await db.getVocabById(String(event.vocab_id));
     expect(vocab.status).toBe("review");

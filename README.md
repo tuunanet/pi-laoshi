@@ -15,7 +15,7 @@ Early implementation stage. See [`docs/plans/pi-laoshi-agent-plan.md`](docs/plan
 - DuckDB schema initialization under `~/.pi/agent/laoshi/learning.duckdb` by default
 - `PI_LAOSHI_DB_PATH` and `PI_LAOSHI_STATE_DIR` overrides for local testing or alternate storage
 - Chinese teacher skill
-- Prompt templates and extension commands for chat, lessons, settings, pinyin visibility, vocabulary review, learner evaluation, handwriting practice, sync, export, and import
+- Prompt templates and extension commands for chat, lessons, settings, pinyin visibility, vocabulary review, learner evaluation, handwriting practice, sync, export, import, and destructive DuckDB reset
 - Starter lessons and exercises in `content/`
 - TypeScript build and Vitest tests with enforced 100% coverage for `src/`
 
@@ -40,6 +40,8 @@ Azure Blob sync uses:
 - optional `PI_LAOSHI_AZURE_PREFIX`
 
 `/laoshi-sync` uploads when safe. If remote state exists on a new local device it reports `needs-import` instead of overwriting; use `/laoshi-sync pull` to explicitly pull remote state after a local pre-pull backup is created.
+
+`/laoshi-duckdb-reset --confirm` closes pi-laoshi's DuckDB connection, removes `learning.duckdb` plus DuckDB sidecar files, and recreates an empty database with default settings. This is destructive and does not reset custom lesson files.
 
 ## Planned features
 
