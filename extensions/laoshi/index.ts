@@ -1,5 +1,5 @@
 import { rm } from "node:fs/promises";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import { LaoshiDatabase } from "../../src/db.js";
 import { defaultDbPath, ensureLaoshiStateDirs } from "../../src/paths.js";
@@ -121,7 +121,7 @@ export default function laoshiExtension(pi: ExtensionAPI) {
     const profile = await db.profileSummary();
     const lessons = await listActivities();
     return {
-      systemPrompt: `${event.systemPrompt}\n\n## pi-laoshi learner context\nUse the pi-laoshi tools to persist vocabulary, activity, handwriting, settings, and evaluation progress when teaching Standard Mandarin (Putonghua). Respect pinyin_visibility from learner settings. Distinguish introduced vocabulary from vocabulary the learner has produced correctly. Convert Traditional Chinese input/content to Simplified for learner-facing materials and tracking. For casual chat startup, do not persist new vocabulary or vocabulary events until the learner responds or explicitly asks to learn the word.\n\nCurrent learner profile:\n${JSON.stringify(profile, null, 2)}\n\nAvailable pi-laoshi activities (custom items are editable; package items are read-only):\n${JSON.stringify(lessons, null, 2)}\n`,
+      systemPrompt: `${event.systemPrompt}\n\n## pi-laoshi learner context\nUse the pi-laoshi tools to persist vocabulary, activity, handwriting, settings, and evaluation progress when teaching Standard Mandarin (Putonghua). Respect pinyin_visibility from learner settings. Distinguish introduced vocabulary from vocabulary the learner has produced correctly. Convert Traditional Chinese input/content to Simplified for learner-facing materials and tracking. For casual chat startup, do not persist new vocabulary or vocabulary events until the learner responds or explicitly asks to learn the word. During active pi-laoshi study, only treat messages containing the marker [pi-laoshi learner answer] as learner answers; ordinary user messages are meta/unrelated unless they explicitly ask to learn Chinese. Ask the learner to answer with /laoshi-answer or /la.\n\nCurrent learner profile:\n${JSON.stringify(profile, null, 2)}\n\nAvailable pi-laoshi activities (custom items are editable; package items are read-only):\n${JSON.stringify(lessons, null, 2)}\n`,
     };
   });
 
@@ -149,6 +149,28 @@ export default function laoshiExtension(pi: ExtensionAPI) {
       const updated = await db.updateSettings(parseSettingsArgs(args));
       ctx.ui.notify(`Updated pi-laoshi settings: ${updated.map((s) => `${s.key}=${s.value}`).join(", ")}`, "info");
     },
+  });
+
+  async function sendLearnerAnswer(args: string, ctx: ExtensionCommandContext): Promise<void> {
+    const answer = args.trim();
+    if (!answer) {
+      ctx.ui.notify("Usage: /laoshi-answer <your Mandarin answer> (shorthand: /la <answer>)", "warning");
+      return;
+    }
+    await ctx.waitForIdle();
+    pi.sendUserMessage(
+      `Use the chinese-teacher skill. Treat the following as my explicit Mandarin practice answer for the active pi-laoshi activity. Because this was submitted with /laoshi-answer or /la, you may correct/evaluate it and record vocabulary/events when appropriate.\n\n[pi-laoshi learner answer]\n${answer}`,
+    );
+  }
+
+  pi.registerCommand("laoshi-answer", {
+    description: "Submit an answer to the active pi-laoshi study prompt",
+    handler: sendLearnerAnswer,
+  });
+
+  pi.registerCommand("la", {
+    description: "Shorthand for /laoshi-answer",
+    handler: sendLearnerAnswer,
   });
 
   pi.registerCommand("laoshi-lesson", {

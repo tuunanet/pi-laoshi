@@ -41,6 +41,8 @@ Azure Blob sync uses:
 
 `/laoshi-sync` uploads when safe. If remote state exists on a new local device it reports `needs-import` instead of overwriting; use `/laoshi-sync pull` to explicitly pull remote state after a local pre-pull backup is created.
 
+During pi-laoshi study activities, submit practice answers with `/laoshi-answer <answer>` or the shorthand `/la <answer>`. Ordinary chat messages are treated as meta/unrelated unless you explicitly ask to learn Chinese.
+
 `/laoshi-duckdb-reset --confirm` closes pi-laoshi's DuckDB connection, removes `learning.duckdb` plus DuckDB sidecar files, and recreates an empty database with default settings. This is destructive and does not reset custom lesson files.
 
 ## Planned features

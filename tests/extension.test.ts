@@ -46,11 +46,13 @@ function createMockPi() {
   const tools: RegisteredTool[] = [];
   const commands = new Map<string, RegisteredCommand>();
   const notifications: Array<{ message: string; level?: string }> = [];
+  const sentUserMessages: Array<{ content: unknown; options?: unknown }> = [];
   return {
     handlers,
     tools,
     commands,
     notifications,
+    sentUserMessages,
     on(name: string, handler: Function) {
       handlers.set(name, [...(handlers.get(name) ?? []), handler]);
     },
@@ -60,8 +62,13 @@ function createMockPi() {
     registerCommand(name: string, command: RegisteredCommand) {
       commands.set(name, command);
     },
-    sendUserMessage() {},
-    commandContext: { ui: { notify: (message: string, level?: string) => notifications.push({ message, level }) } },
+    sendUserMessage(content: unknown, options?: unknown) {
+      sentUserMessages.push({ content, options });
+    },
+    commandContext: {
+      ui: { notify: (message: string, level?: string) => notifications.push({ message, level }) },
+      waitForIdle: vi.fn(async () => undefined),
+    },
   } as any;
 }
 
@@ -88,6 +95,8 @@ describe("laoshi extension", () => {
     laoshiExtension(pi);
 
     expect([...pi.commands.keys()].sort()).toEqual([
+      "la",
+      "laoshi-answer",
       "laoshi-duckdb-reset",
       "laoshi-evaluate",
       "laoshi-export",
@@ -113,6 +122,21 @@ describe("laoshi extension", () => {
       "laoshi_update_activity",
       "laoshi_update_settings",
     ]));
+  });
+
+  it("routes explicit learner answers through /laoshi-answer and /la", async () => {
+    const pi = createMockPi();
+    laoshiExtension(pi);
+
+    await pi.commands.get("laoshi-answer")?.handler("今天很好", pi.commandContext);
+    await pi.commands.get("la")?.handler("我不忙", pi.commandContext);
+    expect(pi.sentUserMessages).toHaveLength(2);
+    expect(String(pi.sentUserMessages[0].content)).toContain("[pi-laoshi learner answer]\n今天很好");
+    expect(String(pi.sentUserMessages[1].content)).toContain("[pi-laoshi learner answer]\n我不忙");
+
+    await pi.commands.get("la")?.handler("", pi.commandContext);
+    expect(pi.notifications.at(-1)).toMatchObject({ level: "warning" });
+    expect(pi.sentUserMessages).toHaveLength(2);
   });
 
   it("closes the database around state export, import, and sync tools", async () => {
